@@ -1,20 +1,99 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Poltel Hub
 
-# Run and deploy your AI Studio app
+Dashboard do zarządzania automatyzacjami contentowymi opartymi na Airtable. Zastępuje bezpośrednią interakcję z Airtable przyjaznym interfejsem użytkownika.
 
-This contains everything you need to run your app locally.
+🔗 **Demo:** [https://poltel-hub.vercel.app](https://poltel-hub.vercel.app)
 
-View your app in AI Studio: https://ai.studio/apps/drive/1nWevJh1VzCNXDKA4JwLGLkOMpRN6g1Yx
+## Funkcjonalności
 
-## Run Locally
+- **Artykuły z Internetu** - generowanie artykułów na podstawie linków źródłowych
+- **Generator Opisów Produktów** - opisy zoptymalizowane pod SEO
+- **Wyszukiwarka Odpowiedników** - analiza konkurencji i alternatywnych produktów
+- **Artykuły Eksperckie SEO** - rozbudowane artykuły blogowe
+- **Artykuły Ogólne** - proste treści na stronę
 
-**Prerequisites:**  Node.js
+## Stack technologiczny
 
+- **React 19** + **TypeScript**
+- **Vite** - bundler i dev server
+- **Tailwind CSS** - styling
+- **Lucide React** - ikony
+- **Airtable API** - backend danych
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Uruchomienie lokalne
+
+```bash
+# Instalacja zależności
+npm install
+
+# Uruchomienie serwera deweloperskiego (port 3000)
+npm run dev
+
+# Build produkcyjny
+npm run build
+```
+
+## Konfiguracja
+
+1. Otwórz aplikację
+2. Kliknij przycisk **Konfiguracja** (prawy górny róg)
+3. Wprowadź:
+   - **API Key** - Personal Access Token z Airtable
+   - **Base ID** - ID bazy Airtable (zaczyna się od `app...`)
+
+Dane są przechowywane w localStorage przeglądarki.
+
+## Struktura projektu
+
+```
+├── App.tsx              # Główny komponent (dashboard + widok narzędzia)
+├── constants.tsx        # Konfiguracja narzędzi automatyzacji
+├── types.ts             # Interfejsy TypeScript
+├── services/
+│   └── airtableService.ts   # Klient API Airtable
+├── index.html           # HTML z Tailwind CDN
+├── vite.config.ts       # Konfiguracja Vite
+└── vercel.json          # Konfiguracja deploymentu
+```
+
+## Dodawanie nowego narzędzia
+
+Dodaj wpis do tablicy `AUTOMATION_TOOLS` w `constants.tsx`:
+
+```typescript
+{
+  id: 'unique-id',
+  label: 'Nazwa wyświetlana',
+  tableName: 'Nazwa tabeli w Airtable',
+  icon: <IconComponent className="w-5 h-5" />,
+  description: 'Opis funkcjonalności',
+  inputFields: [
+    { key: 'NazwaKolumny', label: 'Etykieta', type: 'text', required: true }
+  ],
+  outputFields: ['Kolumna Wynikowa 1', 'Kolumna Wynikowa 2']
+}
+```
+
+## Przepływ danych
+
+```
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Poltel    │────▶│   Airtable   │────▶│  n8n/Make    │
+│    Hub      │◀────│     API      │◀────│ Automatyzacje│
+└─────────────┘     └──────────────┘     └──────────────┘
+```
+
+1. Użytkownik wprowadza dane w Poltel Hub
+2. Dane zapisywane są w Airtable ze statusem "Do zrobienia"
+3. Automatyzacje n8n przetwarzają rekordy i aktualizują wyniki
+4. Poltel Hub wyświetla wyniki (auto-refresh co 10s)
+
+## Planowany rozwój
+
+- [ ] Migracja z Airtable na Supabase
+- [ ] System uwierzytelniania użytkowników
+- [ ] Bezpieczne przechowywanie kluczy API
+
+## Licencja
+
+Projekt prywatny - wszystkie prawa zastrzeżone.
