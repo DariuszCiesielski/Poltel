@@ -1,0 +1,5 @@
+{
+  "name": "Poltel Automation Dashboard",
+  "description": "A centralized interface for managing Airtable-based content automations (Product Descriptions, Articles, Search). Replaces direct Airtable interaction with a user-friendly React UI.",
+  "requestFramePermissions": []
+}
