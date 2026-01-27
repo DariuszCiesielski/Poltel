@@ -277,6 +277,9 @@ export default function App() {
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<{ recordId: string; columnKey: string } | null>(null);
   const [cellEditValue, setCellEditValue] = useState<string>('');
+  const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null); // ID rekordu z otwartym dropdown statusu
+  const [uploadingFile, setUploadingFile] = useState<{ recordId: string; columnKey: string; progress: string } | null>(null);
+  const [dragOverFile, setDragOverFile] = useState<{ recordId: string; columnKey: string } | null>(null);
   const resizingColumn = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizingRow = useRef<{ startY: number; startHeight: number } | null>(null);
 
@@ -285,7 +288,8 @@ export default function App() {
     if (columnWidths[key]) return columnWidths[key];
     if (type === 'url') return 220;
     if (type === 'textarea') return 200;
-    if (key === 'Status') return 150;
+    if (type === 'file') return 160;
+    if (key === 'Status') return 180;
     if (key === 'Utworzono') return 95;
     if (key === 'Zmodyfikowano') return 95;
     return 180;
@@ -349,9 +353,8 @@ export default function App() {
   // Generowanie domyślnej kolejności kolumn
   const getDefaultColumnOrder = useCallback(() => {
     if (!activeTool) return [];
-    const inputCols = activeTool.inputFields
-      .filter(f => !f.showForMode || f.showForMode === 'url')
-      .map(f => f.key);
+    // Pokazuj wszystkie kolumny wejściowe (włącznie z plikami Excel)
+    const inputCols = activeTool.inputFields.map(f => f.key);
     const outputCols = activeTool.outputFields;
     return [...inputCols, ...outputCols, 'Status', 'Utworzono', 'Zmodyfikowano'];
   }, [activeTool]);
@@ -694,18 +697,85 @@ export default function App() {
     return getColumnOrder().filter(col => !hiddenColumns.has(col));
   };
 
-  // Lista dostępnych statusów
-  const STATUS_OPTIONS = [
-    'Generuj opis',
-    'Przetwórz plik Excel',
-    'W toku',
-    'Zrobione',
-    'Błąd',
-    'Eksportuj dane do pliku',
-    'Plik eksportu wysłany',
-    'Plik przetworzony',
-    'Błąd pliku'
+  // Lista dostępnych statusów z kolorami (zgodne z Airtable)
+  const STATUS_OPTIONS: { value: string; bgColor: string; textColor: string; borderColor: string }[] = [
+    { value: 'Generuj opis', bgColor: 'bg-amber-100', textColor: 'text-amber-800', borderColor: 'border-amber-300' },
+    { value: 'Przetwórz plik Excel', bgColor: 'bg-amber-100', textColor: 'text-amber-800', borderColor: 'border-amber-300' },
+    { value: 'W toku', bgColor: 'bg-blue-100', textColor: 'text-blue-800', borderColor: 'border-blue-300' },
+    { value: 'Zrobione', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800', borderColor: 'border-emerald-300' },
+    { value: 'Błąd', bgColor: 'bg-rose-100', textColor: 'text-rose-800', borderColor: 'border-rose-300' },
+    { value: 'Eksportuj dane do pliku', bgColor: 'bg-purple-100', textColor: 'text-purple-800', borderColor: 'border-purple-300' },
+    { value: 'Plik eksportu wysłany', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800', borderColor: 'border-emerald-300' },
+    { value: 'Plik przetworzony', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800', borderColor: 'border-emerald-300' },
+    { value: 'Błąd pliku', bgColor: 'bg-rose-100', textColor: 'text-rose-800', borderColor: 'border-rose-300' }
   ];
+
+  // Pobierz kolory dla statusu
+  const getStatusColors = (status: string) => {
+    const option = STATUS_OPTIONS.find(opt => opt.value.toLowerCase() === status.toLowerCase());
+    return option || { bgColor: 'bg-slate-100', textColor: 'text-slate-700', borderColor: 'border-slate-300' };
+  };
+
+  // Upload pliku na Cloudinary i zwróć URL
+  const uploadFileToHost = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', 'n8n_uploads');
+
+    // Użyj Cloudinary - dla plików nie-obrazowych używamy "raw"
+    const response = await fetch('https://api.cloudinary.com/v1_1/dqba3j0s1/raw/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || 'Błąd podczas uploadu pliku');
+    }
+
+    const data = await response.json();
+    if (!data.secure_url) {
+      throw new Error('Nie udało się uzyskać linku do pliku');
+    }
+
+    return data.secure_url;
+  };
+
+  // Obsługa uploadu pliku przez drag & drop lub input
+  const handleFileUpload = async (file: File, record: AirtableRecord, columnKey: string) => {
+    if (!activeTool) return;
+
+    // Sprawdź typ pliku
+    const allowedExtensions = ['.xlsx', '.xls'];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!allowedExtensions.includes(fileExtension)) {
+      alert('Dozwolone są tylko pliki Excel (.xlsx, .xls)');
+      return;
+    }
+
+    setUploadingFile({ recordId: record.id, columnKey, progress: 'Przesyłanie...' });
+
+    try {
+      // Upload pliku na hosting
+      setUploadingFile({ recordId: record.id, columnKey, progress: 'Wysyłanie na serwer...' });
+      const fileUrl = await uploadFileToHost(file);
+
+      // Zapisz URL w Airtable
+      setUploadingFile({ recordId: record.id, columnKey, progress: 'Zapisywanie w Airtable...' });
+      const actualKey = findFieldKey(record, columnKey) || columnKey;
+      await airtable.updateRecord(activeTool.tableName, record.id, {
+        [actualKey]: [{ url: fileUrl, filename: file.name }]
+      });
+
+      await loadRecords();
+    } catch (err) {
+      console.error('Błąd uploadu pliku:', err);
+      alert(`Wystąpił błąd podczas uploadu pliku: ${err instanceof Error ? err.message : 'Nieznany błąd'}`);
+    } finally {
+      setUploadingFile(null);
+      setDragOverFile(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1297,25 +1367,59 @@ export default function App() {
                                 const isEditing = editingCell?.recordId === record.id && editingCell?.columnKey === columnKey;
                                 const isDateColumn = columnKey === 'Utworzono' || columnKey === 'Zmodyfikowano';
 
-                                // Status - dropdown
+                                // Status - custom dropdown z kolorami
                                 if (columnKey === 'Status') {
+                                  const statusColors = getStatusColors(status);
+                                  const isDropdownOpen = openStatusDropdown === record.id;
+
                                   return (
                                     <td
                                       key={columnKey}
-                                      className="px-2 py-1 border-r border-slate-100 align-middle"
+                                      className="px-2 py-1 border-r border-slate-100 align-middle relative"
                                       style={{ width: getColumnWidth('Status') }}
                                       onClick={e => e.stopPropagation()}
                                     >
-                                      <select
-                                        value={status}
-                                        onChange={e => handleQuickStatusChange(record, e.target.value)}
+                                      {/* Przycisk pokazujący aktualny status */}
+                                      <button
+                                        onClick={() => setOpenStatusDropdown(isDropdownOpen ? null : record.id)}
                                         disabled={isSaving}
-                                        className="w-full text-xs font-medium rounded-md border-slate-200 bg-white py-1.5 px-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer hover:bg-slate-50 disabled:opacity-50"
+                                        className={`w-full text-xs font-semibold rounded-md border py-1.5 px-2 cursor-pointer transition-all disabled:opacity-50 flex items-center justify-between gap-1 ${statusColors.bgColor} ${statusColors.textColor} ${statusColors.borderColor} hover:opacity-80`}
                                       >
-                                        {STATUS_OPTIONS.map(opt => (
-                                          <option key={opt} value={opt}>{opt}</option>
-                                        ))}
-                                      </select>
+                                        <span className="truncate">{status}</span>
+                                        <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                      </button>
+
+                                      {/* Lista opcji */}
+                                      {isDropdownOpen && (
+                                        <>
+                                          {/* Overlay do zamknięcia */}
+                                          <div
+                                            className="fixed inset-0 z-40"
+                                            onClick={() => setOpenStatusDropdown(null)}
+                                          />
+                                          {/* Dropdown menu */}
+                                          <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-50 max-h-[300px] overflow-y-auto">
+                                            {STATUS_OPTIONS.map(opt => (
+                                              <button
+                                                key={opt.value}
+                                                onClick={() => {
+                                                  handleQuickStatusChange(record, opt.value);
+                                                  setOpenStatusDropdown(null);
+                                                }}
+                                                className={`w-full text-left px-2 py-1.5 text-xs font-medium hover:bg-slate-50 transition-colors flex items-center gap-2`}
+                                              >
+                                                <span className={`inline-block w-3 h-3 rounded-full ${opt.bgColor} border ${opt.borderColor}`}></span>
+                                                <span className={opt.textColor}>{opt.value}</span>
+                                                {status === opt.value && (
+                                                  <Check className="w-3 h-3 ml-auto text-blue-600" />
+                                                )}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </>
+                                      )}
                                     </td>
                                   );
                                 }
@@ -1403,6 +1507,167 @@ export default function App() {
                                             <span className="text-slate-300 italic">Kliknij 2x aby edytować...</span>
                                           )}
                                         </div>
+                                      )}
+                                    </td>
+                                  );
+                                }
+
+                                // Pola plikowe (załączniki Airtable) z drag & drop
+                                if (colInfo.type === 'file') {
+                                  const attachments = getFieldValue(record, columnKey) as Array<{url: string; filename?: string}> | undefined;
+                                  const hasFile = attachments && attachments.length > 0;
+                                  const isUploading = uploadingFile?.recordId === record.id && uploadingFile?.columnKey === columnKey;
+                                  const isDragOver = dragOverFile?.recordId === record.id && dragOverFile?.columnKey === columnKey;
+
+                                  return (
+                                    <td
+                                      key={columnKey}
+                                      className={`px-2 py-1 border-r border-slate-100 align-middle transition-colors ${isDragOver ? 'bg-blue-100' : ''}`}
+                                      style={{ width: getColumnWidth(columnKey, 'file') }}
+                                      onClick={e => e.stopPropagation()}
+                                      onDragOver={e => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (!isUploading) {
+                                          setDragOverFile({ recordId: record.id, columnKey });
+                                        }
+                                      }}
+                                      onDragLeave={e => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragOverFile(null);
+                                      }}
+                                      onDrop={e => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragOverFile(null);
+                                        if (isUploading) return;
+                                        const files = e.dataTransfer.files;
+                                        if (files.length > 0) {
+                                          handleFileUpload(files[0], record, columnKey);
+                                        }
+                                      }}
+                                    >
+                                      {/* Stan uploadu */}
+                                      {isUploading ? (
+                                        <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-2 py-1.5 rounded-md border border-blue-200">
+                                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                          <span className="truncate">{uploadingFile.progress}</span>
+                                        </div>
+                                      ) : isEditing ? (
+                                        <div className="flex flex-col gap-1">
+                                          <input
+                                            type="url"
+                                            value={cellEditValue}
+                                            onChange={e => setCellEditValue(e.target.value)}
+                                            placeholder="Wklej URL do pliku..."
+                                            className="w-full text-xs border border-blue-300 rounded p-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                            autoFocus
+                                            onKeyDown={e => {
+                                              if (e.key === 'Escape') cancelCellEdit();
+                                              if (e.key === 'Enter') {
+                                                if (cellEditValue.trim()) {
+                                                  const saveFileAttachment = async () => {
+                                                    if (!activeTool) return;
+                                                    setIsSaving(true);
+                                                    try {
+                                                      const actualKey = findFieldKey(record, columnKey) || columnKey;
+                                                      await airtable.updateRecord(activeTool.tableName, record.id, {
+                                                        [actualKey]: [{ url: cellEditValue.trim() }]
+                                                      });
+                                                      await loadRecords();
+                                                    } catch (err) {
+                                                      console.error('Błąd zapisu pliku:', err);
+                                                      alert('Wystąpił błąd podczas zapisu pliku.');
+                                                    } finally {
+                                                      setIsSaving(false);
+                                                      cancelCellEdit();
+                                                    }
+                                                  };
+                                                  saveFileAttachment();
+                                                } else {
+                                                  cancelCellEdit();
+                                                }
+                                              }
+                                            }}
+                                          />
+                                          <div className="flex gap-1 justify-end">
+                                            <button onClick={() => cancelCellEdit()} className="text-xs px-2 py-0.5 text-slate-600 hover:bg-slate-200 rounded">Anuluj</button>
+                                            <button
+                                              onClick={async () => {
+                                                if (!activeTool || !cellEditValue.trim()) {
+                                                  cancelCellEdit();
+                                                  return;
+                                                }
+                                                setIsSaving(true);
+                                                try {
+                                                  const actualKey = findFieldKey(record, columnKey) || columnKey;
+                                                  await airtable.updateRecord(activeTool.tableName, record.id, {
+                                                    [actualKey]: [{ url: cellEditValue.trim() }]
+                                                  });
+                                                  await loadRecords();
+                                                } catch (err) {
+                                                  console.error('Błąd zapisu pliku:', err);
+                                                  alert('Wystąpił błąd podczas zapisu pliku.');
+                                                } finally {
+                                                  setIsSaving(false);
+                                                  cancelCellEdit();
+                                                }
+                                              }}
+                                              disabled={isSaving}
+                                              className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                            >
+                                              {isSaving ? '...' : 'Zapisz'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : hasFile ? (
+                                        <div className="flex items-center gap-1.5">
+                                          <a
+                                            href={attachments[0].url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200"
+                                            title={attachments[0].filename || 'Pobierz plik'}
+                                          >
+                                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                                            <span className="truncate max-w-[80px]">
+                                              {attachments[0].filename || 'Plik'}
+                                            </span>
+                                          </a>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              startCellEdit(record.id, columnKey, attachments[0].url);
+                                            }}
+                                            className="text-slate-400 hover:text-slate-600 p-1"
+                                            title="Zmień plik (URL)"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      ) : isDragOver ? (
+                                        <div className="flex items-center justify-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1.5 rounded-md border-2 border-dashed border-blue-400 w-full">
+                                          <Upload className="w-3.5 h-3.5" />
+                                          <span>Upuść tutaj</span>
+                                        </div>
+                                      ) : (
+                                        <label className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 px-2 py-1.5 rounded-md border border-dashed border-slate-300 hover:border-blue-400 transition-colors w-full justify-center cursor-pointer">
+                                          <Upload className="w-3.5 h-3.5" />
+                                          <span>Przeciągnij lub kliknij</span>
+                                          <input
+                                            type="file"
+                                            accept=".xlsx,.xls"
+                                            className="hidden"
+                                            onChange={e => {
+                                              const file = e.target.files?.[0];
+                                              if (file) {
+                                                handleFileUpload(file, record, columnKey);
+                                              }
+                                              e.target.value = '';
+                                            }}
+                                          />
+                                        </label>
                                       )}
                                     </td>
                                   );
@@ -1589,7 +1854,7 @@ export default function App() {
                       >
                         <option value="">Wybierz status...</option>
                         {STATUS_OPTIONS.map(opt => (
-                          <option key={opt} value={opt}>{opt}</option>
+                          <option key={opt.value} value={opt.value}>{opt.value}</option>
                         ))}
                       </select>
                     </div>

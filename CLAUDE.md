@@ -74,6 +74,13 @@ npm run preview      # Podgląd buildu produkcyjnego
 - `editingCell` - { recordId, columnKey } | null
 - `cellEditValue` - wartość podczas edycji
 
+**Upload plików:**
+- `uploadingFile` - { recordId, columnKey, progress } | null - stan uploadu
+- `dragOverFile` - { recordId, columnKey } | null - pole nad którym jest przeciągany plik
+
+**Status dropdown:**
+- `openStatusDropdown` - ID rekordu z otwartym dropdown statusu
+
 **Modal:**
 - `selectedRecord` - wybrany rekord (otwiera modal)
 - `modalEditMode` - tryb edycji w modalu
@@ -112,22 +119,32 @@ Poltel Hub → Airtable API → n8n/Make Automatyzacje → Airtable API → Polt
 
 **Case-insensitive field matching**: Aplikacja obsługuje różnice w wielkości liter między konfiguracją a rzeczywistymi nazwami kolumn w Airtable (funkcje `findFieldKey`, `getFieldValue` w App.tsx).
 
-**Status workflow**: Pole `Status` (stała `STATUS_FIELD_NAME`) z wartościami zdefiniowanymi w `STATUS_OPTIONS`:
+**Status workflow**: Pole `Status` (stała `STATUS_FIELD_NAME`) z wartościami i kolorami zdefiniowanymi w `STATUS_OPTIONS`:
 ```typescript
 const STATUS_OPTIONS = [
-  'Generuj opis',           // Oczekuje na przetworzenie (tryb URL)
-  'Przetwórz plik Excel',   // Oczekuje na import (tryb Excel)
-  'W toku',                 // Przetwarzanie przez AI
-  'Zrobione',               // Zakończone sukcesem
-  'Błąd',                   // Błąd podczas generowania
-  'Eksportuj dane do pliku', // Trigger eksportu
-  'Plik eksportu wysłany',  // Eksport zakończony
-  'Plik przetworzony',      // Import Excel zakończony
-  'Błąd pliku'              // Błąd importu Excel
+  { value: 'Generuj opis', bgColor: 'bg-amber-100', textColor: 'text-amber-800' },
+  { value: 'Przetwórz plik Excel', bgColor: 'bg-amber-100', textColor: 'text-amber-800' },
+  { value: 'W toku', bgColor: 'bg-blue-100', textColor: 'text-blue-800' },
+  { value: 'Zrobione', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800' },
+  { value: 'Błąd', bgColor: 'bg-rose-100', textColor: 'text-rose-800' },
+  { value: 'Eksportuj dane do pliku', bgColor: 'bg-purple-100', textColor: 'text-purple-800' },
+  { value: 'Plik eksportu wysłany', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800' },
+  { value: 'Plik przetworzony', bgColor: 'bg-emerald-100', textColor: 'text-emerald-800' },
+  { value: 'Błąd pliku', bgColor: 'bg-rose-100', textColor: 'text-rose-800' }
 ];
 ```
+
+**Kolory statusów:**
+| Status | Kolor | Znaczenie |
+|--------|-------|-----------|
+| Generuj opis, Przetwórz plik Excel | Żółty (amber) | Oczekuje na przetworzenie |
+| W toku | Niebieski (blue) | W trakcie przetwarzania |
+| Zrobione, Plik eksportu wysłany, Plik przetworzony | Zielony (emerald) | Zakończone sukcesem |
+| Błąd, Błąd pliku | Czerwony (rose) | Błąd |
+| Eksportuj dane do pliku | Fioletowy (purple) | Trigger eksportu |
+
 Status można zmieniać:
-- Bezpośrednio w tabeli (dropdown w kolumnie Status)
+- Bezpośrednio w tabeli (kolorowy dropdown w kolumnie Status)
 - W modalu edycji (dropdown w sekcji Status)
 
 **Auto-refresh**: Widok narzędzia automatycznie odświeża dane co 10 sekund.
@@ -144,11 +161,19 @@ Status można zmieniać:
 Rekordy wyświetlane są w interaktywnej tabeli z następującymi funkcjonalnościami:
 
 **Kolumny:**
-- Pola wejściowe z konfiguracji narzędzia (`inputFields`)
+- Pola wejściowe z konfiguracji narzędzia (`inputFields`) - w tym pola plikowe
 - Pola wynikowe (`outputFields`)
-- Status (dropdown do szybkiej zmiany)
+- Status (kolorowy dropdown do szybkiej zmiany)
 - Utworzono (data z `createdTime`)
 - Zmodyfikowano (data z `Last modified time`)
+
+**Pola plikowe (typ `file`):**
+- Wyświetlane jako zielony badge z ikoną pliku Excel
+- Kliknięcie otwiera plik w nowej karcie
+- Przycisk edycji pozwala zmienić URL
+- **Drag & drop** - przeciągnij plik z komputera na pole
+- **Kliknij** - otwiera dialog wyboru pliku
+- Upload przez Cloudinary (patrz sekcja "Upload plików przez Cloudinary")
 
 **Zarządzanie kolumnami:**
 - **Ukrywanie/pokazywanie** - przycisk "Kolumny" w pasku narzędzi otwiera panel z checkboxami
@@ -167,9 +192,18 @@ Rekordy wyświetlane są w interaktywnej tabeli z następującymi funkcjonalnoś
 Wszystkie pola (oprócz dat systemowych) są edytowalne bezpośrednio w tabeli:
 
 **Status:**
-- Dropdown z listą `STATUS_OPTIONS` w każdym wierszu
+- Kolorowy custom dropdown z listą `STATUS_OPTIONS` w każdym wierszu
+- Aktualny status wyświetlany jako kolorowy przycisk
+- Lista opcji z kolorowymi kropkami wskazującymi kategorię
 - Zmiana następuje natychmiast po wybraniu opcji
 - Funkcja `handleQuickStatusChange()`
+- Stan `openStatusDropdown` śledzi otwarty dropdown
+
+**Pola plikowe:**
+- Drag & drop plików Excel bezpośrednio na komórkę
+- Klik otwiera dialog wyboru pliku
+- Upload przez Cloudinary z wizualnym feedbackiem (spinner, progress)
+- Funkcja `handleFileUpload()`
 
 **Pozostałe pola:**
 - **Dwuklik** na komórkę rozpoczyna edycję
@@ -252,6 +286,33 @@ interface AirtableAttachment {
 }
 // Przykład zapisu: fields['Plik Excel'] = [{ url: 'https://...' }]
 ```
+
+### Upload plików przez Cloudinary
+
+Aplikacja obsługuje **drag & drop** plików Excel bezpośrednio w tabeli. Pliki są uploadowane na Cloudinary, a URL jest zapisywany w Airtable.
+
+**Konfiguracja Cloudinary:**
+```typescript
+// W App.tsx - funkcja uploadFileToHost()
+Cloud name: 'dqba3j0s1'
+Upload preset: 'n8n_uploads' (unsigned)
+Endpoint: https://api.cloudinary.com/v1_1/dqba3j0s1/raw/upload
+```
+
+**Jak działa upload:**
+1. Użytkownik przeciąga plik Excel na pole w tabeli (lub klika i wybiera plik)
+2. Plik jest walidowany (tylko .xlsx, .xls)
+3. Plik jest uploadowany na Cloudinary (endpoint `/raw/upload` dla plików nie-obrazowych)
+4. Cloudinary zwraca `secure_url`
+5. URL jest zapisywany jako załącznik w Airtable
+
+**Stan podczas uploadu:**
+- `uploadingFile` - pokazuje spinner z postępem
+- `dragOverFile` - podświetla pole podczas przeciągania
+
+**Wymagania Cloudinary:**
+- Upload preset musi być ustawiony jako **Unsigned** (Settings → Upload → Upload presets)
+- Pliki są przechowywane trwale w Cloudinary
 
 ## Automatyzacje n8n
 
@@ -441,7 +502,9 @@ Webhook → Search (Status="Eksportuj dane do pliku") → Create Spreadsheet →
 | Dwuklik | Komórka (nie-data) | Edycja inline |
 | Przeciągnij | Nagłówek kolumny (⠿) | Zmień kolejność kolumn |
 | Przeciągnij | Prawa krawędź nagłówka | Zmień szerokość kolumny |
-| Klik | Dropdown Status | Szybka zmiana statusu |
+| Klik | Dropdown Status | Otwórz kolorowy dropdown statusów |
+| Przeciągnij plik | Pole plikowe | Upload pliku na Cloudinary |
+| Klik | Pole plikowe (puste) | Otwórz dialog wyboru pliku |
 
 ### Pasek narzędzi tabeli
 
