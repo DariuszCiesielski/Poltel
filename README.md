@@ -35,6 +35,7 @@ npm run build
 
 ## Konfiguracja
 
+### Opcja 1: Przez interfejs (zalecane)
 1. Otwórz aplikację
 2. Kliknij przycisk **Konfiguracja** (prawy górny róg)
 3. Wprowadź:
@@ -42,6 +43,20 @@ npm run build
    - **Base ID** - ID bazy Airtable (zaczyna się od `app...`)
 
 Dane są przechowywane w localStorage przeglądarki.
+
+### Opcja 2: Zmienne środowiskowe
+Skopiuj `.env.example` do `.env` i uzupełnij:
+
+```bash
+cp .env.example .env
+```
+
+```bash
+VITE_AIRTABLE_API_KEY=pat...  # Token z https://airtable.com/create/tokens
+VITE_AIRTABLE_BASE_ID=app...  # ID z URL bazy Airtable
+```
+
+**Priorytet**: localStorage > zmienne środowiskowe
 
 ## Struktura projektu
 

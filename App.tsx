@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AirtableService } from './services/airtableService';
-import { AUTOMATION_TOOLS, STATUS_FIELD_NAME, STATUS_DONE, STATUS_IN_PROGRESS, STATUS_TODO } from './constants';
+import { AUTOMATION_TOOLS, STATUS_FIELD_NAME, PRODUCT_DESC_STATUSES } from './constants';
 import { AirtableRecord, AirtableRecordFields } from './types';
-import { 
-  Settings, 
-  Plus, 
-  RefreshCw, 
-  CheckCircle, 
-  Clock, 
-  AlertCircle, 
+import {
+  Settings,
+  Plus,
+  RefreshCw,
+  CheckCircle,
+  Clock,
+  AlertCircle,
   ChevronRight,
   Database,
   LayoutGrid,
@@ -19,7 +19,19 @@ import {
   Info,
   Copy,
   ExternalLink,
-  List
+  List,
+  Eye,
+  EyeOff,
+  Code,
+  Download,
+  Check,
+  Upload,
+  FileSpreadsheet,
+  Link,
+  Send,
+  FileDown,
+  Columns,
+  X
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -50,15 +62,30 @@ const StatusBadge = ({ status }: { status: string }) => {
 
   const normalizedStatus = status?.toLowerCase() || '';
 
-  if (normalizedStatus === 'done' || normalizedStatus === 'zrobione') {
+  // Statusy zakończone sukcesem
+  if (normalizedStatus === 'done' || normalizedStatus === 'zrobione' || normalizedStatus === 'plik eksportu wysłany' || normalizedStatus === 'plik przetworzony') {
     colorClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
     icon = <CheckCircle className="w-3 h-3 mr-1.5" />;
-  } else if (normalizedStatus === 'in progress' || normalizedStatus === 'w trakcie') {
+  }
+  // Statusy w trakcie przetwarzania
+  else if (normalizedStatus === 'in progress' || normalizedStatus === 'w trakcie' || normalizedStatus === 'w toku') {
     colorClass = 'bg-blue-50 text-blue-700 border-blue-200';
     icon = <RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />;
-  } else if (normalizedStatus === 'error' || normalizedStatus === 'błąd') {
+  }
+  // Statusy błędów
+  else if (normalizedStatus === 'error' || normalizedStatus === 'błąd' || normalizedStatus === 'błąd pliku') {
     colorClass = 'bg-rose-50 text-rose-700 border-rose-200';
     icon = <AlertCircle className="w-3 h-3 mr-1.5" />;
+  }
+  // Statusy oczekujące na przetworzenie
+  else if (normalizedStatus === 'generuj opis' || normalizedStatus === 'przetwórz plik excel') {
+    colorClass = 'bg-amber-50 text-amber-700 border-amber-200';
+    icon = <Clock className="w-3 h-3 mr-1.5" />;
+  }
+  // Status eksportu
+  else if (normalizedStatus === 'eksportuj dane do pliku') {
+    colorClass = 'bg-purple-50 text-purple-700 border-purple-200';
+    icon = <FileDown className="w-3 h-3 mr-1.5" />;
   }
 
   return (
@@ -69,12 +96,149 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
+// --- HTML Output Viewer Component ---
+const HtmlOutputViewer = ({ content, fieldName }: { content: string; fieldName: string }) => {
+  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [copied, setCopied] = useState(false);
+
+  const isHtml = content.trim().startsWith('<') && content.includes('>');
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    const fullHtml = `<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${fieldName}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 2rem; color: #1e293b; }
+    h1, h2, h3, h4 { color: #0f172a; margin-top: 1.5em; }
+    p { margin: 1em 0; }
+    ul, ol { padding-left: 1.5em; }
+    a { color: #2563eb; }
+    img { max-width: 100%; height: auto; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #e2e8f0; padding: 0.5rem; text-align: left; }
+    th { background: #f8fafc; }
+    blockquote { border-left: 4px solid #3b82f6; margin: 1em 0; padding-left: 1em; color: #64748b; }
+    code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #1e293b; color: #e2e8f0; padding: 1em; border-radius: 8px; overflow-x: auto; }
+    pre code { background: none; padding: 0; }
+  </style>
+</head>
+<body>
+${content}
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fieldName.replace(/\s+/g, '_').toLowerCase()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Jeśli to nie HTML, renderuj jako zwykły tekst
+  if (!isHtml) {
+    return (
+      <div className="p-6 md:p-8 bg-white min-h-[100px]">
+        <div className="whitespace-pre-wrap text-slate-700 leading-relaxed text-sm font-sans">{content}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
+        {/* View Mode Tabs */}
+        <div className="flex bg-slate-200/70 rounded-lg p-0.5">
+          <button
+            onClick={() => setViewMode('preview')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              viewMode === 'preview'
+                ? 'bg-white text-slate-800 shadow-sm'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Podgląd
+          </button>
+          <button
+            onClick={() => setViewMode('code')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+              viewMode === 'code'
+                ? 'bg-white text-slate-800 shadow-sm'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            <Code className="w-3.5 h-3.5" />
+            Kod HTML
+          </button>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCopy}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              copied
+                ? 'bg-emerald-100 text-emerald-700'
+                : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-800 hover:border-slate-300'
+            }`}
+          >
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? 'Skopiowano!' : 'Kopiuj kod'}
+          </button>
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-all"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Pobierz HTML
+          </button>
+        </div>
+      </div>
+
+      {/* Content Area */}
+      {viewMode === 'preview' ? (
+        <div className="p-6 md:p-8 bg-white min-h-[200px]">
+          <div
+            className="prose prose-slate max-w-none prose-headings:text-slate-800 prose-p:text-slate-600 prose-a:text-blue-600 prose-strong:text-slate-800 prose-img:rounded-lg prose-table:border-collapse"
+            dangerouslySetInnerHTML={{ __html: content }}
+          />
+        </div>
+      ) : (
+        <div className="relative">
+          <pre className="p-6 md:p-8 bg-slate-900 text-slate-100 text-sm font-mono overflow-x-auto min-h-[200px] max-h-[500px] overflow-y-auto">
+            <code>{content}</code>
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
-  // Configuration State
-  const [apiKey, setApiKey] = useState(localStorage.getItem('AT_API_KEY') || '');
-  const [baseId, setBaseId] = useState(localStorage.getItem('AT_BASE_ID') || '');
+  // Configuration State - prioritize localStorage, fallback to env vars
+  const [apiKey, setApiKey] = useState(
+    localStorage.getItem('AT_API_KEY') || import.meta.env.VITE_AIRTABLE_API_KEY || ''
+  );
+  const [baseId, setBaseId] = useState(
+    localStorage.getItem('AT_BASE_ID') || import.meta.env.VITE_AIRTABLE_BASE_ID || ''
+  );
   const [showSettings, setShowSettings] = useState(false);
 
   // Navigation State
@@ -91,13 +255,188 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<AirtableRecord | null>(null);
+  const [modalEditMode, setModalEditMode] = useState(false);
+  const [modalFormData, setModalFormData] = useState<AirtableRecordFields>({});
 
   // Form State
   const [formData, setFormData] = useState<AirtableRecordFields>({});
+  const [selectedInputMode, setSelectedInputMode] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const activeTool = AUTOMATION_TOOLS.find(t => t.id === activeToolId);
   const airtable = new AirtableService(apiKey, baseId);
   const isConfigured = apiKey.length > 0 && baseId.length > 0;
+
+  // --- Table Resize State ---
+  const [columnWidths, setColumnWidths] = useState<{ [key: string]: number }>({});
+  const [rowHeight, setRowHeight] = useState(80); // Domyślna wysokość wiersza
+  const [columnOrder, setColumnOrder] = useState<string[]>([]); // Kolejność kolumn
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set()); // Ukryte kolumny
+  const [showColumnSettings, setShowColumnSettings] = useState(false); // Panel ustawień kolumn
+  const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<{ recordId: string; columnKey: string } | null>(null);
+  const [cellEditValue, setCellEditValue] = useState<string>('');
+  const resizingColumn = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+  const resizingRow = useRef<{ startY: number; startHeight: number } | null>(null);
+
+  // Domyślne szerokości kolumn
+  const getColumnWidth = (key: string, type?: string) => {
+    if (columnWidths[key]) return columnWidths[key];
+    if (type === 'url') return 220;
+    if (type === 'textarea') return 200;
+    if (key === 'Status') return 150;
+    if (key === 'Utworzono') return 95;
+    if (key === 'Zmodyfikowano') return 95;
+    return 180;
+  };
+
+  // Obsługa zmiany szerokości kolumny
+  const handleColumnResizeStart = (e: React.MouseEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startWidth = getColumnWidth(key);
+    resizingColumn.current = { key, startX: e.clientX, startWidth };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingColumn.current) return;
+      const diff = moveEvent.clientX - resizingColumn.current.startX;
+      const newWidth = Math.max(80, resizingColumn.current.startWidth + diff);
+      setColumnWidths(prev => ({ ...prev, [resizingColumn.current!.key]: newWidth }));
+    };
+
+    const handleMouseUp = () => {
+      resizingColumn.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Obsługa zmiany wysokości wierszy
+  const handleRowResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingRow.current = { startY: e.clientY, startHeight: rowHeight };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingRow.current) return;
+      const diff = moveEvent.clientY - resizingRow.current.startY;
+      const newHeight = Math.max(40, Math.min(200, resizingRow.current.startHeight + diff));
+      setRowHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      resizingRow.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Generowanie domyślnej kolejności kolumn
+  const getDefaultColumnOrder = useCallback(() => {
+    if (!activeTool) return [];
+    const inputCols = activeTool.inputFields
+      .filter(f => !f.showForMode || f.showForMode === 'url')
+      .map(f => f.key);
+    const outputCols = activeTool.outputFields;
+    return [...inputCols, ...outputCols, 'Status', 'Utworzono', 'Zmodyfikowano'];
+  }, [activeTool]);
+
+  // Pobierz aktualną kolejność kolumn (lub domyślną)
+  const getColumnOrder = useCallback(() => {
+    const defaultOrder = getDefaultColumnOrder();
+    if (columnOrder.length === 0) return defaultOrder;
+    // Upewnij się, że wszystkie kolumny są uwzględnione
+    const missingCols = defaultOrder.filter(col => !columnOrder.includes(col));
+    const validOrder = columnOrder.filter(col => defaultOrder.includes(col));
+    return [...validOrder, ...missingCols];
+  }, [columnOrder, getDefaultColumnOrder]);
+
+  // Obsługa drag & drop kolumn
+  const handleDragStart = (e: React.DragEvent, columnKey: string) => {
+    setDraggedColumn(columnKey);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', columnKey);
+    // Ustaw niestandardowy obraz przeciągania
+    const dragImage = document.createElement('div');
+    dragImage.textContent = columnKey;
+    dragImage.style.cssText = 'position: absolute; top: -1000px; background: #3b82f6; color: white; padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: bold;';
+    document.body.appendChild(dragImage);
+    e.dataTransfer.setDragImage(dragImage, 50, 20);
+    setTimeout(() => document.body.removeChild(dragImage), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, columnKey: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedColumn && columnKey !== draggedColumn) {
+      setDragOverColumn(columnKey);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverColumn(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetColumnKey: string) => {
+    e.preventDefault();
+    if (!draggedColumn || draggedColumn === targetColumnKey) {
+      setDraggedColumn(null);
+      setDragOverColumn(null);
+      return;
+    }
+
+    const currentOrder = getColumnOrder();
+    const draggedIndex = currentOrder.indexOf(draggedColumn);
+    const targetIndex = currentOrder.indexOf(targetColumnKey);
+
+    if (draggedIndex === -1 || targetIndex === -1) return;
+
+    const newOrder = [...currentOrder];
+    newOrder.splice(draggedIndex, 1);
+    newOrder.splice(targetIndex, 0, draggedColumn);
+
+    setColumnOrder(newOrder);
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedColumn(null);
+    setDragOverColumn(null);
+  };
+
+  // Pobierz informacje o kolumnie (typ, label)
+  const getColumnInfo = (columnKey: string) => {
+    if (!activeTool) return { label: columnKey, type: 'text' };
+
+    const inputField = activeTool.inputFields.find(f => f.key === columnKey);
+    if (inputField) return { label: inputField.label, type: inputField.type };
+
+    if (activeTool.outputFields.includes(columnKey)) {
+      return { label: columnKey, type: 'output' };
+    }
+
+    if (columnKey === 'Status') return { label: 'Status', type: 'status' };
+    if (columnKey === 'Utworzono') return { label: 'Utworzono', type: 'date' };
+    if (columnKey === 'Zmodyfikowano') return { label: 'Zmodyfikowano', type: 'date' };
+
+    return { label: columnKey, type: 'text' };
+  };
 
   // --- Methods ---
 
@@ -154,6 +493,13 @@ export default function App() {
     setFormData({});
     setEditingRecordId(null);
     setSelectedRecord(null);
+    setSelectedFile(null);
+    // Ustaw domyślny tryb wejścia jeśli narzędzie ma tryby
+    if (activeTool?.inputModes && activeTool.inputModes.length > 0) {
+      setSelectedInputMode(activeTool.inputModes[0].id);
+    } else {
+      setSelectedInputMode('');
+    }
     setShowForm(true);
   };
 
@@ -173,6 +519,194 @@ export default function App() {
     setShowForm(true);
   };
 
+  // Inicjalizacja edycji w modalu
+  const initModalEdit = () => {
+    if (!selectedRecord || !activeTool) return;
+    const newFormData: AirtableRecordFields = {};
+
+    // Pobierz wszystkie pola wejściowe
+    activeTool.inputFields.forEach(field => {
+      const val = getFieldValue(selectedRecord, field.key);
+      newFormData[field.key] = val !== undefined ? val : '';
+    });
+
+    // Pobierz pola wynikowe (też edytowalne)
+    activeTool.outputFields.forEach(fieldKey => {
+      const val = getFieldValue(selectedRecord, fieldKey);
+      newFormData[fieldKey] = val !== undefined ? val : '';
+    });
+
+    // Pobierz Status
+    const statusVal = getFieldValue(selectedRecord, STATUS_FIELD_NAME);
+    newFormData[STATUS_FIELD_NAME] = statusVal !== undefined ? statusVal : '';
+
+    setModalFormData(newFormData);
+    setModalEditMode(true);
+  };
+
+  // Anulowanie edycji w modalu
+  const cancelModalEdit = () => {
+    setModalEditMode(false);
+    setModalFormData({});
+  };
+
+  // Zapisanie zmian z modalu
+  const handleModalSave = async () => {
+    if (!selectedRecord || !activeTool) return;
+
+    setIsSaving(true);
+    try {
+      const finalFields: AirtableRecordFields = {};
+
+      // Mapuj pola wejściowe
+      activeTool.inputFields.forEach(field => {
+        const configKey = field.key;
+        const actualKey = findFieldKey(selectedRecord, configKey) || configKey;
+
+        if (field.type === 'file' && modalFormData[configKey]) {
+          finalFields[actualKey] = [{ url: String(modalFormData[configKey]) }];
+        } else if (modalFormData[configKey] !== undefined && modalFormData[configKey] !== '') {
+          finalFields[actualKey] = modalFormData[configKey];
+        }
+      });
+
+      // Mapuj pola wynikowe
+      activeTool.outputFields.forEach(fieldKey => {
+        const actualKey = findFieldKey(selectedRecord, fieldKey) || fieldKey;
+        if (modalFormData[fieldKey] !== undefined) {
+          finalFields[actualKey] = modalFormData[fieldKey];
+        }
+      });
+
+      // Mapuj Status
+      if (modalFormData[STATUS_FIELD_NAME]) {
+        const actualStatusKey = findFieldKey(selectedRecord, STATUS_FIELD_NAME) || STATUS_FIELD_NAME;
+        finalFields[actualStatusKey] = modalFormData[STATUS_FIELD_NAME];
+      }
+
+      await airtable.updateRecord(activeTool.tableName, selectedRecord.id, finalFields);
+
+      setModalEditMode(false);
+      setModalFormData({});
+      await loadRecords();
+    } catch (err) {
+      console.error('Błąd zapisu:', err);
+      alert('Wystąpił błąd podczas zapisu. Sprawdź konsolę.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Zmiana wartości pola w modalu
+  const handleModalFieldChange = (key: string, value: string) => {
+    setModalFormData(prev => ({ ...prev, [key]: value }));
+  };
+
+  // --- Inline Cell Editing ---
+
+  // Rozpoczęcie edycji komórki
+  const startCellEdit = (recordId: string, columnKey: string, currentValue: string) => {
+    setEditingCell({ recordId, columnKey });
+    setCellEditValue(currentValue);
+  };
+
+  // Anulowanie edycji komórki
+  const cancelCellEdit = () => {
+    setEditingCell(null);
+    setCellEditValue('');
+  };
+
+  // Zapisanie edycji komórki
+  const saveCellEdit = async (record: AirtableRecord) => {
+    if (!editingCell || !activeTool) return;
+
+    const { columnKey } = editingCell;
+
+    // Nie pozwalaj na edycję pól dat
+    if (columnKey === 'Utworzono' || columnKey === 'Zmodyfikowano') {
+      cancelCellEdit();
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const actualKey = findFieldKey(record, columnKey) || columnKey;
+      const updateFields: AirtableRecordFields = {};
+
+      // Dla pól typu file, przekształć na format załącznika
+      const fieldConfig = activeTool.inputFields.find(f => f.key === columnKey);
+      if (fieldConfig?.type === 'file' && cellEditValue) {
+        updateFields[actualKey] = [{ url: cellEditValue }];
+      } else {
+        updateFields[actualKey] = cellEditValue;
+      }
+
+      await airtable.updateRecord(activeTool.tableName, record.id, updateFields);
+      await loadRecords();
+    } catch (err) {
+      console.error('Błąd zapisu komórki:', err);
+      alert('Wystąpił błąd podczas zapisu.');
+    } finally {
+      setIsSaving(false);
+      cancelCellEdit();
+    }
+  };
+
+  // Szybka zmiana statusu (bez wchodzenia w tryb edycji)
+  const handleQuickStatusChange = async (record: AirtableRecord, newStatus: string) => {
+    if (!activeTool) return;
+
+    setIsSaving(true);
+    try {
+      const actualKey = findFieldKey(record, STATUS_FIELD_NAME) || STATUS_FIELD_NAME;
+      await airtable.updateRecord(activeTool.tableName, record.id, { [actualKey]: newStatus });
+      await loadRecords();
+    } catch (err) {
+      console.error('Błąd zmiany statusu:', err);
+      alert('Wystąpił błąd podczas zmiany statusu.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- Column Visibility ---
+
+  // Przełącz widoczność kolumny
+  const toggleColumnVisibility = (columnKey: string) => {
+    setHiddenColumns(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey);
+      } else {
+        newSet.add(columnKey);
+      }
+      return newSet;
+    });
+  };
+
+  // Pokaż wszystkie kolumny
+  const showAllColumns = () => {
+    setHiddenColumns(new Set());
+  };
+
+  // Pobierz widoczne kolumny
+  const getVisibleColumns = () => {
+    return getColumnOrder().filter(col => !hiddenColumns.has(col));
+  };
+
+  // Lista dostępnych statusów
+  const STATUS_OPTIONS = [
+    'Generuj opis',
+    'Przetwórz plik Excel',
+    'W toku',
+    'Zrobione',
+    'Błąd',
+    'Eksportuj dane do pliku',
+    'Plik eksportu wysłany',
+    'Plik przetworzony',
+    'Błąd pliku'
+  ];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeTool) return;
@@ -181,31 +715,53 @@ export default function App() {
     try {
       // Prepare payload mapping back to actual keys if editing, or config keys if creating
       const finalFields: AirtableRecordFields = {};
-      
-      Object.keys(formData).forEach(configKey => {
-          let targetKey = configKey;
-          
-          // If editing, try to find the existing column name to match exact case
-          if (editingRecordId && records.length > 0) {
-              const originalRecord = records.find(r => r.id === editingRecordId);
-              if (originalRecord) {
-                  const actualKey = findFieldKey(originalRecord, configKey);
-                  if (actualKey) targetKey = actualKey;
-              }
-          }
-          finalFields[targetKey] = formData[configKey];
+
+      // Filtruj pola według wybranego trybu wejścia
+      const relevantFields = activeTool.inputFields.filter(field => {
+        if (!field.showForMode) return true; // Pole bez ograniczenia trybu
+        return field.showForMode === selectedInputMode;
       });
+
+      relevantFields.forEach(field => {
+        const configKey = field.key;
+        let targetKey = configKey;
+
+        // If editing, try to find the existing column name to match exact case
+        if (editingRecordId && records.length > 0) {
+          const originalRecord = records.find(r => r.id === editingRecordId);
+          if (originalRecord) {
+            const actualKey = findFieldKey(originalRecord, configKey);
+            if (actualKey) targetKey = actualKey;
+          }
+        }
+
+        // Dla plików Excel, przekształć URL na format załącznika Airtable
+        if (field.type === 'file' && formData[configKey]) {
+          finalFields[targetKey] = [{ url: String(formData[configKey]) }];
+        } else if (formData[configKey] !== undefined) {
+          finalFields[targetKey] = formData[configKey];
+        }
+      });
+
+      // Ustaw odpowiedni status początkowy na podstawie trybu wejścia
+      if (!editingRecordId && activeTool.inputModes && selectedInputMode) {
+        const mode = activeTool.inputModes.find(m => m.id === selectedInputMode);
+        if (mode) {
+          finalFields[STATUS_FIELD_NAME] = mode.initialStatus;
+        }
+      }
 
       if (editingRecordId) {
         await airtable.updateRecord(activeTool.tableName, editingRecordId, finalFields);
       } else {
         await airtable.createRecord(activeTool.tableName, finalFields);
       }
-      
+
       setFormData({});
       setShowForm(false);
       setEditingRecordId(null);
-      await loadRecords(); 
+      setSelectedFile(null);
+      await loadRecords();
     } catch (err) {
       alert('Wystąpił błąd podczas zapisu. Sprawdź konsolę.');
     } finally {
@@ -220,41 +776,80 @@ export default function App() {
   // Improved title resolution using case-insensitive lookup
   const getRecordTitle = (record: AirtableRecord) => {
       if (!activeTool) return 'Record';
-      
-      // Priority 1: Configuration key
+
+      // Priority 1: Configuration key (first input field)
       const configKey = activeTool.inputFields[0].key;
       const configVal = getFieldValue(record, configKey);
-      if (configVal) return String(configVal);
+      if (configVal && String(configVal).trim()) return String(configVal);
 
-      // Priority 2: Common fallback keys (case insensitive)
-      const commonKeys = ['temat', 'nazwa', 'nazwa produktu', 'title', 'subject', 'name', 'produkt'];
-      for (const common of commonKeys) {
-          const val = getFieldValue(record, common);
-          if (val) return String(val);
+      // Priority 2: Any configured input field
+      for (const field of activeTool.inputFields) {
+          const val = getFieldValue(record, field.key);
+          if (val && String(val).trim() && !String(val).startsWith('http')) {
+              return String(val);
+          }
       }
 
-      // Priority 3: Fallback ID
+      // Priority 3: Common fallback keys (case insensitive)
+      const commonKeys = ['temat', 'nazwa', 'nazwa produktu', 'title', 'subject', 'name', 'produkt', 'tytuł'];
+      for (const common of commonKeys) {
+          const val = getFieldValue(record, common);
+          if (val && String(val).trim()) return String(val);
+      }
+
+      // Priority 4: First non-empty string field in record
+      for (const [key, val] of Object.entries(record.fields)) {
+          if (typeof val === 'string' && val.trim() && !val.startsWith('http') && key.toLowerCase() !== 'status') {
+              return String(val).slice(0, 60) + (String(val).length > 60 ? '...' : '');
+          }
+      }
+
+      // Priority 5: Fallback ID
       return <span className="text-slate-400 font-normal italic">Bez tytułu ({record.id.slice(-4)})</span>;
   };
 
-  const renderContent = (content: any) => {
-    if (!content) return <span className="text-slate-400 italic flex items-center gap-2"><div className="w-4 h-0.5 bg-slate-300"></div> Puste pole...</span>;
-    
-    if (typeof content !== 'string') return JSON.stringify(content);
-    
-    // Check if looks like HTML
-    if (content.trim().startsWith('<') && content.includes('>')) {
-        return (
-            <div 
-                className="prose prose-slate max-w-none text-slate-700 leading-relaxed text-sm" 
-                dangerouslySetInnerHTML={{ __html: content }} 
-            />
-        );
-    }
-    // Markdown-like or plain text
-    return <div className="whitespace-pre-wrap text-slate-700 leading-relaxed text-sm font-sans">{content}</div>;
+  // Get preview text for list item
+  const getRecordPreview = (record: AirtableRecord) => {
+      if (!activeTool) return null;
+
+      // Check output fields first - show fragment of generated content
+      for (const outputKey of activeTool.outputFields) {
+          const content = getFieldValue(record, outputKey);
+          if (content && String(content).trim()) {
+              // Strip HTML tags and get preview
+              const textContent = String(content).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+              if (textContent.length > 0) {
+                  return textContent.slice(0, 80) + (textContent.length > 80 ? '...' : '');
+              }
+          }
+      }
+
+      // Fallback to second input field
+      if (activeTool.inputFields.length > 1) {
+          const secondField = activeTool.inputFields[1];
+          const val = getFieldValue(record, secondField.key);
+          if (val && String(val).trim()) {
+              const text = String(val);
+              if (text.startsWith('http')) {
+                  return text.slice(0, 50) + '...';
+              }
+              return text.slice(0, 80) + (text.length > 80 ? '...' : '');
+          }
+      }
+
+      return null;
   };
-  
+
+  // Check if record has output content
+  const hasOutputContent = (record: AirtableRecord) => {
+      if (!activeTool) return false;
+      for (const outputKey of activeTool.outputFields) {
+          const content = getFieldValue(record, outputKey);
+          if (content && String(content).trim()) return true;
+      }
+      return false;
+  };
+
   // Calculate remaining fields that were not displayed
   const getRemainingFields = () => {
       if (!selectedRecord || !activeTool) return [];
@@ -463,14 +1058,56 @@ export default function App() {
              </h2>
           </div>
           <div className="flex gap-2">
-            <button 
-              onClick={loadRecords} 
+            <button
+              onClick={loadRecords}
               className="p-2 text-slate-500 hover:bg-slate-100 hover:text-blue-600 rounded-lg transition-colors"
               title="Odśwież dane"
             >
               <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
-            <button 
+
+            {/* Przycisk eksportu dla narzędzi obsługujących eksport */}
+            {activeTool?.supportsExport && records.some(r => {
+              const status = String(getFieldValue(r, STATUS_FIELD_NAME) || '').toLowerCase();
+              return status === 'zrobione';
+            }) && (
+              <button
+                onClick={async () => {
+                  if (!activeTool) return;
+                  const confirmed = window.confirm(
+                    'Czy chcesz wyeksportować wszystkie ukończone rekordy do pliku Excel?\n\n' +
+                    'Plik zostanie wysłany na adres email skonfigurowany w automatyzacji n8n.'
+                  );
+                  if (!confirmed) return;
+
+                  try {
+                    // Znajdź pierwszy rekord ze statusem "Zrobione" i zmień na "Eksportuj dane do pliku"
+                    const doneRecord = records.find(r => {
+                      const status = String(getFieldValue(r, STATUS_FIELD_NAME) || '').toLowerCase();
+                      return status === 'zrobione';
+                    });
+
+                    if (doneRecord) {
+                      await airtable.updateRecord(activeTool.tableName, doneRecord.id, {
+                        [STATUS_FIELD_NAME]: PRODUCT_DESC_STATUSES.EXPORT
+                      });
+                      alert('Eksport został uruchomiony! Plik zostanie wysłany na email po przetworzeniu.');
+                      await loadRecords();
+                    }
+                  } catch (err) {
+                    alert('Błąd podczas uruchamiania eksportu. Sprawdź konsolę.');
+                    console.error(err);
+                  }
+                }}
+                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-all active:scale-95"
+                title="Eksportuj ukończone rekordy do Excel"
+              >
+                <Send className="w-4 h-4" />
+                <span className="hidden sm:inline">Eksportuj</span>
+              </button>
+            )}
+
+            <button
               onClick={initCreateForm}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-all active:scale-95"
             >
@@ -482,8 +1119,8 @@ export default function App() {
 
         <div className="flex-1 flex overflow-hidden">
           
-          {/* Records List Column */}
-          <div className={`${selectedRecord || showForm ? 'hidden lg:block w-80 xl:w-96' : 'w-full'} flex-shrink-0 border-r border-slate-200 bg-white overflow-y-auto transition-all duration-300`}>
+          {/* Records Table View */}
+          <div className={`${showForm ? 'hidden lg:flex' : 'flex'} flex-1 flex-col bg-white overflow-hidden`}>
             {error ? (
               <div className="p-8 text-center flex flex-col items-center justify-center h-full">
                 <div className="bg-rose-50 text-rose-600 p-4 rounded-full mb-4">
@@ -494,7 +1131,7 @@ export default function App() {
                 <button onClick={() => setShowSettings(true)} className="text-blue-600 text-sm font-medium hover:underline">Sprawdź konfigurację</button>
               </div>
             ) : records.length === 0 ? (
-                <div className="p-10 text-center text-slate-400 flex flex-col items-center mt-20">
+                <div className="p-10 text-center text-slate-400 flex flex-col items-center justify-center flex-1">
                     <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                         <Database className="w-8 h-8 opacity-30" />
                     </div>
@@ -502,42 +1139,599 @@ export default function App() {
                     <p className="text-xs mt-1">Tabela jest pusta.</p>
                 </div>
             ) : (
-                <div className="divide-y divide-slate-100">
-                {records.map(record => {
-                    const statusVal = getFieldValue(record, STATUS_FIELD_NAME);
-                    const status = String(statusVal || 'Unknown');
-                    const isSelected = selectedRecord?.id === record.id;
-                    
-                    return (
-                    <div 
-                        key={record.id}
-                        onClick={() => { setSelectedRecord(record); setShowForm(false); }}
-                        className={`p-4 cursor-pointer hover:bg-slate-50 transition-all border-l-4 group ${
-                        isSelected 
-                            ? 'bg-blue-50/60 border-blue-600' 
-                            : 'border-transparent'
-                        }`}
-                    >
-                        <div className="flex justify-between items-start gap-3 mb-2">
-                            <h3 className={`font-semibold text-sm line-clamp-2 leading-snug ${isSelected ? 'text-blue-700' : 'text-slate-700'}`}>
-                                {getRecordTitle(record)}
-                            </h3>
+                <div className="flex flex-col flex-1 overflow-hidden">
+                  {/* Pasek narzędzi tabeli */}
+                  <div className="flex items-center gap-3 px-4 py-2 bg-slate-100 border-b border-slate-200 text-xs text-slate-600">
+                    <span className="font-medium">Wysokość:</span>
+                    <input
+                      type="range"
+                      min="40"
+                      max="200"
+                      value={rowHeight}
+                      onChange={e => setRowHeight(Number(e.target.value))}
+                      className="w-24 h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                    <span className="text-slate-500 w-10">{rowHeight}px</span>
+
+                    <div className="h-4 w-px bg-slate-300 mx-1"></div>
+
+                    {/* Przycisk ustawień kolumn */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowColumnSettings(!showColumnSettings)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors ${
+                          showColumnSettings ? 'bg-blue-100 text-blue-700' : 'bg-white hover:bg-slate-50 text-slate-600'
+                        } border border-slate-200`}
+                      >
+                        <Columns className="w-3.5 h-3.5" />
+                        <span>Kolumny</span>
+                        {hiddenColumns.size > 0 && (
+                          <span className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                            {hiddenColumns.size}
+                          </span>
+                        )}
+                      </button>
+
+                      {/* Panel ustawień kolumn */}
+                      {showColumnSettings && (
+                        <div className="absolute top-full left-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 min-w-[240px]">
+                          <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                            <span className="font-semibold text-slate-700 text-sm">Widoczność kolumn</span>
+                            <button
+                              onClick={showAllColumns}
+                              className="text-blue-600 hover:text-blue-700 text-xs font-medium"
+                            >
+                              Pokaż wszystkie
+                            </button>
+                          </div>
+                          <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                            {getColumnOrder().map(columnKey => {
+                              const colInfo = getColumnInfo(columnKey);
+                              const isHidden = hiddenColumns.has(columnKey);
+                              const isDateColumn = columnKey === 'Utworzono' || columnKey === 'Zmodyfikowano';
+
+                              return (
+                                <label
+                                  key={columnKey}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                    isHidden ? 'bg-slate-50 text-slate-400' : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={!isHidden}
+                                    onChange={() => toggleColumnVisibility(columnKey)}
+                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="flex-1 text-sm">{colInfo.label}</span>
+                                  {isDateColumn && (
+                                    <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      systemowe
+                                    </span>
+                                  )}
+                                </label>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between mt-2">
-                            <span className="text-[10px] text-slate-400 font-medium bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
-                                {new Date(record.createdTime).toLocaleDateString()}
-                            </span>
-                            <StatusBadge status={status} />
-                        </div>
+                      )}
                     </div>
-                    );
-                })}
+
+                    <div className="ml-auto flex items-center gap-2 text-slate-400">
+                      <span className="hidden lg:inline">
+                        <span className="text-blue-500">⇄</span> Przeciągnij kolumny
+                      </span>
+                      <span className="hidden lg:inline text-slate-300">|</span>
+                      <span className="hidden lg:inline">
+                        <span className="text-blue-500">↔</span> Zmień szerokość
+                      </span>
+                      <span className="hidden lg:inline text-slate-300">|</span>
+                      <span>
+                        <span className="text-emerald-500">✎</span> Kliknij 2x aby edytować
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-auto" onClick={() => setShowColumnSettings(false)}>
+                    <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
+                      <thead className="sticky top-0 z-10">
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          {getVisibleColumns().map((columnKey, index) => {
+                            const colInfo = getColumnInfo(columnKey);
+                            const isDragging = draggedColumn === columnKey;
+                            const isDragOver = dragOverColumn === columnKey;
+
+                            return (
+                              <th
+                                key={columnKey}
+                                draggable
+                                onDragStart={e => handleDragStart(e, columnKey)}
+                                onDragOver={e => handleDragOver(e, columnKey)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={e => handleDrop(e, columnKey)}
+                                onDragEnd={handleDragEnd}
+                                className={`text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200 relative group select-none transition-all
+                                  ${isDragging ? 'opacity-50 bg-blue-100' : 'bg-slate-50'}
+                                  ${isDragOver ? 'bg-blue-200 border-l-2 border-l-blue-500' : ''}
+                                `}
+                                style={{
+                                  width: getColumnWidth(columnKey, colInfo.type),
+                                  cursor: 'grab'
+                                }}
+                              >
+                                <div className="pr-3 truncate flex items-center gap-1.5">
+                                  <span className="text-slate-300 cursor-grab">⠿</span>
+                                  {colInfo.label}
+                                </div>
+                                {/* Resize handle */}
+                                <div
+                                  onMouseDown={e => handleColumnResizeStart(e, columnKey)}
+                                  onClick={e => e.stopPropagation()}
+                                  className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400 transition-colors group-hover:bg-blue-200 z-10"
+                                  title="Przeciągnij, aby zmienić szerokość"
+                                  draggable={false}
+                                />
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {records.map(record => {
+                          const statusVal = getFieldValue(record, STATUS_FIELD_NAME);
+                          const status = String(statusVal || 'Oczekuje');
+                          const isSelected = selectedRecord?.id === record.id;
+
+                          return (
+                            <tr
+                              key={record.id}
+                              onClick={() => { if (!editingCell) { setSelectedRecord(record); setShowForm(false); } }}
+                              className={`border-b border-slate-100 cursor-pointer transition-all hover:bg-blue-50/50 ${
+                                isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-500' : ''
+                              }`}
+                              style={{ height: rowHeight }}
+                            >
+                              {/* Dynamiczne kolumny według widoczności */}
+                              {getVisibleColumns().map(columnKey => {
+                                const colInfo = getColumnInfo(columnKey);
+                                const isEditing = editingCell?.recordId === record.id && editingCell?.columnKey === columnKey;
+                                const isDateColumn = columnKey === 'Utworzono' || columnKey === 'Zmodyfikowano';
+
+                                // Status - dropdown
+                                if (columnKey === 'Status') {
+                                  return (
+                                    <td
+                                      key={columnKey}
+                                      className="px-2 py-1 border-r border-slate-100 align-middle"
+                                      style={{ width: getColumnWidth('Status') }}
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      <select
+                                        value={status}
+                                        onChange={e => handleQuickStatusChange(record, e.target.value)}
+                                        disabled={isSaving}
+                                        className="w-full text-xs font-medium rounded-md border-slate-200 bg-white py-1.5 px-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer hover:bg-slate-50 disabled:opacity-50"
+                                      >
+                                        {STATUS_OPTIONS.map(opt => (
+                                          <option key={opt} value={opt}>{opt}</option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                  );
+                                }
+
+                                // Data utworzenia (tylko odczyt)
+                                if (columnKey === 'Utworzono') {
+                                  return (
+                                    <td
+                                      key={columnKey}
+                                      className="px-4 py-2 text-xs text-slate-500 align-top border-r border-slate-100"
+                                      style={{ width: getColumnWidth('Utworzono') }}
+                                    >
+                                      {new Date(record.createdTime).toLocaleDateString('pl-PL')}
+                                    </td>
+                                  );
+                                }
+
+                                // Data modyfikacji (tylko odczyt)
+                                if (columnKey === 'Zmodyfikowano') {
+                                  const lastModified = getFieldValue(record, 'Last modified time');
+                                  return (
+                                    <td
+                                      key={columnKey}
+                                      className="px-4 py-2 text-xs text-slate-500 align-top"
+                                      style={{ width: getColumnWidth('Zmodyfikowano') }}
+                                    >
+                                      {lastModified ? new Date(String(lastModified)).toLocaleDateString('pl-PL') : '—'}
+                                    </td>
+                                  );
+                                }
+
+                                // Pola wynikowe (edytowalne)
+                                if (colInfo.type === 'output') {
+                                  const content = getFieldValue(record, columnKey);
+                                  const displayContent = content ? String(content).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+
+                                  return (
+                                    <td
+                                      key={columnKey}
+                                      className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden ${
+                                        isEditing ? 'bg-blue-50 p-1' : 'hover:bg-slate-50'
+                                      }`}
+                                      style={{ width: getColumnWidth(columnKey), maxHeight: rowHeight }}
+                                      onDoubleClick={e => {
+                                        e.stopPropagation();
+                                        startCellEdit(record.id, columnKey, String(content || ''));
+                                      }}
+                                      onClick={e => isEditing && e.stopPropagation()}
+                                    >
+                                      {isEditing ? (
+                                        <div className="flex flex-col gap-1">
+                                          <textarea
+                                            value={cellEditValue}
+                                            onChange={e => setCellEditValue(e.target.value)}
+                                            className="w-full text-sm border border-blue-300 rounded p-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                            style={{ minHeight: rowHeight - 20 }}
+                                            autoFocus
+                                            onKeyDown={e => {
+                                              if (e.key === 'Escape') cancelCellEdit();
+                                              if (e.key === 'Enter' && e.ctrlKey) saveCellEdit(record);
+                                            }}
+                                          />
+                                          <div className="flex gap-1 justify-end">
+                                            <button onClick={() => cancelCellEdit()} className="text-xs px-2 py-0.5 text-slate-600 hover:bg-slate-200 rounded">Anuluj</button>
+                                            <button onClick={() => saveCellEdit(record)} disabled={isSaving} className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                                              {isSaving ? '...' : 'Zapisz'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div
+                                          className="break-words cursor-text"
+                                          style={{
+                                            display: '-webkit-box',
+                                            WebkitLineClamp: Math.floor((rowHeight - 16) / 20),
+                                            WebkitBoxOrient: 'vertical',
+                                            overflow: 'hidden',
+                                            maxHeight: rowHeight - 16
+                                          }}
+                                          title="Kliknij dwukrotnie, aby edytować"
+                                        >
+                                          {displayContent ? (
+                                            <span className="text-slate-600">{displayContent}</span>
+                                          ) : (
+                                            <span className="text-slate-300 italic">Kliknij 2x aby edytować...</span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+                                  );
+                                }
+
+                                // Pola wejściowe (edytowalne)
+                                const val = getFieldValue(record, columnKey);
+                                const displayVal = val ? String(val) : '';
+                                const isUrl = colInfo.type === 'url' || displayVal.startsWith('http');
+
+                                return (
+                                  <td
+                                    key={columnKey}
+                                    className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden ${
+                                      isEditing ? 'bg-blue-50 p-1' : 'hover:bg-slate-50'
+                                    }`}
+                                    style={{ width: getColumnWidth(columnKey, colInfo.type), maxHeight: rowHeight }}
+                                    onDoubleClick={e => {
+                                      e.stopPropagation();
+                                      startCellEdit(record.id, columnKey, displayVal);
+                                    }}
+                                    onClick={e => isEditing && e.stopPropagation()}
+                                  >
+                                    {isEditing ? (
+                                      <div className="flex flex-col gap-1">
+                                        {colInfo.type === 'textarea' ? (
+                                          <textarea
+                                            value={cellEditValue}
+                                            onChange={e => setCellEditValue(e.target.value)}
+                                            className="w-full text-sm border border-blue-300 rounded p-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                            style={{ minHeight: rowHeight - 20 }}
+                                            autoFocus
+                                            onKeyDown={e => {
+                                              if (e.key === 'Escape') cancelCellEdit();
+                                              if (e.key === 'Enter' && e.ctrlKey) saveCellEdit(record);
+                                            }}
+                                          />
+                                        ) : (
+                                          <input
+                                            type={colInfo.type === 'url' ? 'url' : 'text'}
+                                            value={cellEditValue}
+                                            onChange={e => setCellEditValue(e.target.value)}
+                                            className="w-full text-sm border border-blue-300 rounded p-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                            autoFocus
+                                            onKeyDown={e => {
+                                              if (e.key === 'Escape') cancelCellEdit();
+                                              if (e.key === 'Enter') saveCellEdit(record);
+                                            }}
+                                          />
+                                        )}
+                                        <div className="flex gap-1 justify-end">
+                                          <button onClick={() => cancelCellEdit()} className="text-xs px-2 py-0.5 text-slate-600 hover:bg-slate-200 rounded">Anuluj</button>
+                                          <button onClick={() => saveCellEdit(record)} disabled={isSaving} className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                                            {isSaving ? '...' : 'Zapisz'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="overflow-hidden cursor-text" style={{ maxHeight: rowHeight - 16 }} title="Kliknij dwukrotnie, aby edytować">
+                                        {isUrl && displayVal ? (
+                                          <a
+                                            href={displayVal}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={e => e.stopPropagation()}
+                                            className="text-blue-600 hover:underline break-all"
+                                            style={{
+                                              display: '-webkit-box',
+                                              WebkitLineClamp: Math.floor((rowHeight - 16) / 20),
+                                              WebkitBoxOrient: 'vertical',
+                                              overflow: 'hidden'
+                                            }}
+                                          >
+                                            {displayVal}
+                                          </a>
+                                        ) : (
+                                          <div
+                                            className="break-words whitespace-pre-wrap"
+                                            style={{
+                                              display: '-webkit-box',
+                                              WebkitLineClamp: Math.floor((rowHeight - 16) / 20),
+                                              WebkitBoxOrient: 'vertical',
+                                              overflow: 'hidden'
+                                            }}
+                                          >
+                                            {displayVal || <span className="text-slate-300 italic">Kliknij 2x...</span>}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
             )}
           </div>
 
-          {/* Main Detail/Form Area */}
-          <div className="flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 relative">
+          {/* Record Detail/Edit Modal */}
+          {selectedRecord && !showForm && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { if (!modalEditMode) { setSelectedRecord(null); setModalEditMode(false); } }}>
+              <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="flex justify-between items-start px-6 py-4 border-b border-slate-200 bg-slate-50">
+                  <div className="flex-1 min-w-0 pr-4">
+                    <h2 className="text-xl font-bold text-slate-900 truncate mb-1">
+                      {modalEditMode ? 'Edycja rekordu' : getRecordTitle(selectedRecord)}
+                    </h2>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <StatusBadge status={String(getFieldValue(selectedRecord, STATUS_FIELD_NAME) || 'Oczekuje')} />
+                      <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        Utworzono: {new Date(selectedRecord.createdTime).toLocaleString('pl-PL')}
+                      </span>
+                      {(() => {
+                        const lastMod = getFieldValue(selectedRecord, 'Last modified time');
+                        if (!lastMod) return null;
+                        return (
+                          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            Zmodyfikowano: {new Date(String(lastMod)).toLocaleString('pl-PL')}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!modalEditMode ? (
+                      <button
+                        onClick={initModalEdit}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                        Edytuj
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={cancelModalEdit}
+                          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                        >
+                          Anuluj
+                        </button>
+                        <button
+                          onClick={handleModalSave}
+                          disabled={isSaving}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          Zapisz
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => { setSelectedRecord(null); setModalEditMode(false); setModalFormData({}); }}
+                      className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modal Content */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {/* Status (edytowalny) */}
+                  {modalEditMode && (
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" />
+                        Status
+                      </h3>
+                      <select
+                        value={String(modalFormData[STATUS_FIELD_NAME] || '')}
+                        onChange={e => handleModalFieldChange(STATUS_FIELD_NAME, e.target.value)}
+                        className="w-full md:w-64 rounded-lg border-slate-300 border bg-white p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        <option value="">Wybierz status...</option>
+                        {STATUS_OPTIONS.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Dane wejściowe */}
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <Database className="w-4 h-4" />
+                      Dane wejściowe
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {activeTool?.inputFields.map(field => {
+                        const val = modalEditMode ? modalFormData[field.key] : getFieldValue(selectedRecord, field.key);
+                        const isUrl = field.type === 'url' || (typeof val === 'string' && String(val)?.startsWith('http'));
+
+                        return (
+                          <div key={field.key} className={`${field.type === 'textarea' ? 'md:col-span-2' : ''}`}>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
+                              {field.label}
+                            </label>
+                            {modalEditMode ? (
+                              field.type === 'textarea' ? (
+                                <textarea
+                                  value={String(val || '')}
+                                  onChange={e => handleModalFieldChange(field.key, e.target.value)}
+                                  className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[100px]"
+                                  placeholder={field.placeholder}
+                                />
+                              ) : (
+                                <input
+                                  type={field.type === 'url' ? 'url' : 'text'}
+                                  value={String(val || '')}
+                                  onChange={e => handleModalFieldChange(field.key, e.target.value)}
+                                  className="w-full rounded-lg border-slate-300 border bg-white p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                  placeholder={field.placeholder}
+                                />
+                              )
+                            ) : (
+                              <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 text-sm text-slate-700 min-h-[40px]">
+                                {val ? (
+                                  isUrl ? (
+                                    <a href={String(val)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all flex items-center gap-1">
+                                      {String(val)} <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                                    </a>
+                                  ) : (
+                                    <div className="whitespace-pre-wrap break-words">{String(val)}</div>
+                                  )
+                                ) : (
+                                  <span className="text-slate-300 italic">Brak danych</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Wyniki */}
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" />
+                      Wyniki automatyzacji
+                    </h3>
+                    <div className="space-y-4">
+                      {activeTool?.outputFields.map(fieldKey => {
+                        const content = modalEditMode ? modalFormData[fieldKey] : getFieldValue(selectedRecord, fieldKey);
+                        const hasContent = content && String(content).trim().length > 0;
+
+                        return (
+                          <div key={fieldKey} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
+                              <h4 className="font-semibold text-slate-700 text-sm flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                {fieldKey}
+                              </h4>
+                            </div>
+                            {modalEditMode ? (
+                              <div className="p-4">
+                                <textarea
+                                  value={String(content || '')}
+                                  onChange={e => handleModalFieldChange(fieldKey, e.target.value)}
+                                  className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[200px] font-mono"
+                                  placeholder="Wpisz lub wklej zawartość..."
+                                />
+                              </div>
+                            ) : hasContent ? (
+                              <HtmlOutputViewer content={String(content)} fieldName={fieldKey} />
+                            ) : (
+                              <div className="p-6 flex items-center justify-center text-slate-400 italic text-sm">
+                                <Clock className="w-4 h-4 mr-2" />
+                                Oczekiwanie na wynik automatyzacji...
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Uwagi systemowe (tylko odczyt) */}
+                  {!modalEditMode && (() => {
+                    const uwagi = getFieldValue(selectedRecord, 'Uwagi do działania automatyzacji (komentarz)');
+                    if (!uwagi) return null;
+                    return (
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <Info className="w-4 h-4" />
+                          Uwagi systemowe
+                        </h3>
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 whitespace-pre-wrap">
+                          {String(uwagi)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Pozostałe dane (tylko odczyt) */}
+                  {!modalEditMode && getRemainingFields().length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <List className="w-4 h-4" />
+                        Pozostałe dane
+                      </h3>
+                      <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 space-y-3">
+                        {getRemainingFields().map(key => (
+                          <div key={key} className="flex flex-col sm:flex-row sm:gap-4 border-b border-slate-200 last:border-0 pb-2 last:pb-0">
+                            <span className="text-xs font-semibold text-slate-500 min-w-[180px]">{key}</span>
+                            <span className="text-sm text-slate-700 break-all">{String(selectedRecord.fields[key])}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Create/Edit Form Panel */}
+          <div className={`${showForm ? 'flex' : 'hidden'} flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 justify-center items-start`}>
             
             {/* Create/Edit Form */}
             {showForm && activeTool && (
@@ -553,40 +1747,120 @@ export default function App() {
                 </div>
                 <div className="p-6 overflow-y-auto">
                     <form id="automation-form" onSubmit={handleSubmit} className="space-y-5">
-                    {activeTool.inputFields.map(field => (
-                        <div key={field.key}>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                            {field.label} {field.required && <span className="text-red-500">*</span>}
+
+                    {/* Wybór trybu wejścia */}
+                    {activeTool.inputModes && activeTool.inputModes.length > 0 && !editingRecordId && (
+                      <div className="mb-6">
+                        <label className="block text-sm font-semibold text-slate-700 mb-3">
+                          Wybierz źródło danych
                         </label>
-                        {field.type === 'textarea' ? (
-                            <textarea
-                            required={field.required}
-                            className="w-full rounded-lg border-slate-200 border bg-slate-50 p-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm min-h-[140px]"
-                            placeholder={field.placeholder}
-                            value={String(formData[field.key] || '')}
-                            onChange={e => handleInputChange(field.key, e.target.value)}
-                            />
-                        ) : field.type === 'select' ? (
-                            <select
-                            className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 shadow-sm"
-                            value={String(formData[field.key] || '')}
-                            onChange={e => handleInputChange(field.key, e.target.value)}
+                        <div className="grid grid-cols-2 gap-3">
+                          {activeTool.inputModes.map(mode => (
+                            <button
+                              key={mode.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedInputMode(mode.id);
+                                setFormData({});
+                                setSelectedFile(null);
+                              }}
+                              className={`flex flex-col items-center p-4 rounded-xl border-2 transition-all ${
+                                selectedInputMode === mode.id
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
                             >
-                            <option value="">Wybierz opcję...</option>
-                            {field.options?.map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                            </select>
-                        ) : (
-                            <input
-                            type={field.type}
-                            required={field.required}
-                            className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
-                            placeholder={field.placeholder}
-                            value={String(formData[field.key] || '')}
-                            onChange={e => handleInputChange(field.key, e.target.value)}
+                              {mode.id === 'url' ? (
+                                <Link className="w-6 h-6 mb-2" />
+                              ) : (
+                                <FileSpreadsheet className="w-6 h-6 mb-2" />
+                              )}
+                              <span className="font-semibold text-sm">{mode.label}</span>
+                              <span className="text-xs mt-1 opacity-70">{mode.description}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pola formularza - filtrowane według trybu */}
+                    {activeTool.inputFields
+                      .filter(field => {
+                        if (!field.showForMode) return true;
+                        return field.showForMode === selectedInputMode;
+                      })
+                      .map(field => (
+                        <div key={field.key}>
+                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                            {field.label} {field.required && <span className="text-red-500">*</span>}
+                          </label>
+
+                          {field.type === 'textarea' ? (
+                            <textarea
+                              required={field.required}
+                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm min-h-[140px]"
+                              placeholder={field.placeholder}
+                              value={String(formData[field.key] || '')}
+                              onChange={e => handleInputChange(field.key, e.target.value)}
                             />
-                        )}
+                          ) : field.type === 'select' ? (
+                            <select
+                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 shadow-sm"
+                              value={String(formData[field.key] || '')}
+                              onChange={e => handleInputChange(field.key, e.target.value)}
+                            >
+                              <option value="">Wybierz opcję...</option>
+                              {field.options?.map(opt => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                          ) : field.type === 'file' ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-3">
+                                <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all">
+                                  <Upload className="w-5 h-5 text-slate-500" />
+                                  <span className="text-sm text-slate-600">
+                                    {selectedFile ? selectedFile.name : 'Wybierz plik Excel'}
+                                  </span>
+                                  <input
+                                    type="file"
+                                    accept={field.accept}
+                                    className="hidden"
+                                    onChange={e => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        setSelectedFile(file);
+                                        // Dla Airtable potrzebujemy URL - informujemy użytkownika
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <p className="text-xs text-amber-800">
+                                  <strong>Uwaga:</strong> Aby wgrać plik Excel, podaj publiczny URL do pliku
+                                  (np. link z Google Drive, Dropbox). Airtable pobierze plik automatycznie.
+                                </p>
+                              </div>
+                              <input
+                                type="url"
+                                required={field.required}
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                placeholder="https://drive.google.com/... lub https://www.dropbox.com/..."
+                                value={String(formData[field.key] || '')}
+                                onChange={e => handleInputChange(field.key, e.target.value)}
+                              />
+                            </div>
+                          ) : (
+                            <input
+                              type={field.type}
+                              required={field.required}
+                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                              placeholder={field.placeholder}
+                              value={String(formData[field.key] || '')}
+                              onChange={e => handleInputChange(field.key, e.target.value)}
+                            />
+                          )}
                         </div>
                     ))}
                     </form>
@@ -612,139 +1886,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Record Detail View */}
-            {!showForm && selectedRecord && activeTool && (
-              <div className="max-w-4xl mx-auto space-y-8 pb-10 animate-in fade-in duration-300">
-                
-                {/* Mobile Back Button */}
-                <div className="lg:hidden">
-                     <button onClick={() => setSelectedRecord(null)} className="text-slate-500 hover:text-blue-600 flex items-center gap-1 text-sm font-medium transition-colors">
-                        <ArrowLeft className="w-4 h-4" /> Wróć do listy
-                     </button>
-                </div>
-
-                {/* Header Card */}
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:p-8">
-                  <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-6">
-                    <div className="flex-1">
-                        <h2 className="text-2xl font-bold text-slate-900 leading-tight mb-2">
-                           {getRecordTitle(selectedRecord)}
-                        </h2>
-                        <div className="flex items-center gap-3">
-                            <StatusBadge status={String(getFieldValue(selectedRecord, STATUS_FIELD_NAME) || 'Unknown')} />
-                            <span className="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded">ID: {selectedRecord.id}</span>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => initEditForm(selectedRecord)}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-100"
-                    >
-                        <Edit2 className="w-4 h-4" />
-                        Edytuj Dane
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-slate-100">
-                    {activeTool.inputFields.slice(1).map(field => {
-                        const val = getFieldValue(selectedRecord, field.key);
-                        const isUrl = field.type === 'url' || (typeof val === 'string' && val.startsWith('http'));
-                        
-                        return (
-                            <div key={field.key} className="group">
-                                <span className="block text-slate-500 mb-1.5 text-[10px] font-bold uppercase tracking-widest">{field.label}</span>
-                                <div className="text-slate-800 break-words bg-slate-50 p-3 rounded-lg border border-slate-100 text-sm">
-                                    {val ? (
-                                        isUrl ? (
-                                            <a href={String(val)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-1">
-                                                {String(val).slice(0, 40)}... <ExternalLink className="w-3 h-3" />
-                                            </a>
-                                        ) : String(val)
-                                    ) : <span className="text-slate-300 italic">Brak danych</span>}
-                                </div>
-                            </div>
-                        )
-                    })}
-                  </div>
-                </div>
-
-                {/* Outputs Section */}
-                <div className="space-y-6">
-                    <div className="flex items-center gap-4">
-                         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Wyniki</h3>
-                         <div className="h-px bg-slate-200 flex-1"></div>
-                    </div>
-                    
-                    {activeTool.outputFields.map(fieldKey => {
-                        const content = getFieldValue(selectedRecord, fieldKey);
-                        const hasContent = content && String(content).trim().length > 0;
-
-                        return (
-                            <div key={fieldKey} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden group hover:shadow-md transition-all">
-                                <div className="bg-slate-50/50 px-6 py-3 border-b border-slate-200/60 flex justify-between items-center">
-                                    <h4 className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                                        {fieldKey}
-                                    </h4>
-                                    {hasContent && (
-                                        <button 
-                                            onClick={() => navigator.clipboard.writeText(String(content))}
-                                            className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1 px-2 py-1 rounded hover:bg-white transition-colors"
-                                            title="Kopiuj do schowka"
-                                        >
-                                            <Copy className="w-3 h-3" /> Kopiuj
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="p-6 md:p-8 bg-white min-h-[100px]">
-                                    {renderContent(content)}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-                
-                {/* Remaining Data Section - Fallback for fields not in config */}
-                {getRemainingFields().length > 0 && (
-                    <div className="space-y-4 pt-6">
-                        <div className="flex items-center gap-4">
-                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                <List className="w-4 h-4" /> Pozostałe dane
-                             </h3>
-                             <div className="h-px bg-slate-200 flex-1"></div>
-                        </div>
-                        <div className="bg-slate-50 rounded-xl border border-slate-200 p-6 grid grid-cols-1 gap-4">
-                            {getRemainingFields().map(key => (
-                                <div key={key} className="flex flex-col sm:flex-row sm:gap-4 border-b border-slate-200 last:border-0 pb-3 last:pb-0">
-                                    <span className="text-xs font-semibold text-slate-500 min-w-[150px] pt-1">{key}</span>
-                                    <span className="text-sm text-slate-700 font-mono break-all">{String(selectedRecord.fields[key])}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-              </div>
-            )}
-
-            {/* Empty State */}
-            {!showForm && !selectedRecord && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-8">
-                {error ? (
-                     <div className="text-center">
-                        <div className="text-red-300 mb-4 flex justify-center"><AlertTriangle className="w-12 h-12 opacity-50" /></div>
-                        <h3 className="text-lg font-bold text-slate-700 mb-2">Problem z załadowaniem danych</h3>
-                        <p className="text-sm text-slate-500 max-w-sm mx-auto">Wystąpił błąd podczas komunikacji z bazą Airtable.</p>
-                     </div>
-                ) : (
-                    <div className="text-center opacity-60">
-                        <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6 mx-auto">
-                            <LayoutGrid className="w-10 h-10 text-slate-300" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-700 mb-2">Wybierz zadanie</h3>
-                        <p className="text-slate-500 text-sm max-w-xs mx-auto">Kliknij zadanie na liście po lewej, aby zobaczyć szczegóły, lub utwórz nowe.</p>
-                    </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </main>
