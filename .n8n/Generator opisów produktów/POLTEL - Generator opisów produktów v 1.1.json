@@ -1,0 +1,720 @@
+{
+  "name": "POLTEL - Generator opisów produktów v 1.1",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = \"Generuj opis\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "05d7f85f-79df-4b1f-80c0-9b7245ad4c2b",
+      "name": "Search records",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.URL || $json['Link do produktu'] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "2f496410-0b40-487e-98c3-fcec9cac45bf",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pobieramy HTML z pola \"data\"\nconst html = $json.data;\n\n// Funkcja pomocnicza do ekstrakcji i czyszczenia zawartości z tagów\nfunction extractAndClean(html, tag) {\n  const regex = new RegExp(`<${tag}[^>]*class=\"[^\"]*product-cart__name[^\"]*\"[^>]*>(.*?)<\\\\/${tag}>`, 'i');\n  const match = html.match(regex);\n  return match ? match[1].replace(/<\\/?[^>]+(>|$)/g, '').trim() : 'Brak danych';\n}\n\n// Funkcja do wyciągania zawartości div opisu\nfunction extractDescription(html) {\n  const regex = /<div[^>]*class=\"desc-text desc-text--main\"[^>]*>([\\s\\S]*?)<\\/div>/i;\n  const match = html.match(regex);\n  if (!match) return 'Brak opisu';\n\n  return match[1]\n    .replace(/<br\\s*\\/?>/gi, '\\n')              // <br> → nowa linia\n    .replace(/<\\/?[^>]+(>|$)/g, '')             // usuń wszystkie inne tagi\n    .replace(/&nbsp;/g, ' ')                    // usuń &nbsp;\n    .replace(/&amp;/g, '&')                     // zamień &amp;\n    .trim();\n}\n\n// Parsujemy dane\nconst name = extractAndClean(html, 'h1');\nconst description = extractDescription(html);\n\n// Zwracamy dane jako nowy obiekt\nreturn [\n  {\n    json: {\n      name,\n      description\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "aca10f3e-9f17-4351-a4c0-1d46e1fdfb3e",
+      "name": "Code in JavaScript",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": "sonar-pro",
+        "messages": {
+          "message": [
+            {
+              "content": "=[START META-INSTRUKCJI]\nTwoim zadaniem jest wygenerowanie opisu produktu. Twoja odpowiedź MUSI być TYLKO finalnym opisem produktu sformatowanym w Markdown.\nABSOLUTNIE NIE WOLNO Ci dołączać do odpowiedzi żadnych notatek, wyjaśnień, ani \"kroków analizy\" (np. \"KROK 1\", \"KROK 2\", \"Analiza producenta\", \"---\").\nTwoja odpowiedź musi zaczynać się bezpośrednio od tytułu produktu (np. \"**Studnia kablowa...**\") lub pierwszego akapitu opisu.\n[KONIEC META-INSTRUKCJI]\n\nDziałaj jako specjalista do spraw techniki telekomunikacyjnej pracujący w sklepie internetowym Poltel. Otrzymasz adres URL produktu, jego nazwę, \"Przybliżony opis\" oraz (opcjonalnie) \"Dodatkowe instrukcje\".\n\n### WEWNĘTRZNA LOGIKA ANALIZY (Nie pokazuj tego w odpowiedzi)\n\n1.  **INSTRUKCJE DODATKOWE (Priorytet 0):**\n    Sprawdź pole \"Dodatkowe instrukcje\". Jeśli zawiera tekst (inny niż 'Brak'), jego treść jest poleceniem nadrzędnym i musisz się do niego bezwzględnie zastosować, nawet jeśli jest sprzeczne z poniższymi zasadami.\n\n2.  **ANALIZA PRODUCENTA (Priorytet 1):**\n    A. Przeanalizuj \"Przybliżony opis\". Jeśli znajdziesz tam jawną nazwę producenta, zapamiętaj ją.\n    B. Jeśli nie, przeszukaj internet używając nazwy produktu ORAZ kluczowych parametrów z \"Przybliżonego opisu\".\n    C. Podejmij decyzję:\n        * **Zgodność 100%:** Znalazłeś produkt 100% zgodny (nazwa + parametry) i znasz producenta.\n        * **Nieustalony:** Produkty są podobne, ale nie identyczne, lub jest to produkt znormalizowany (jak SKR-2) oferowany przez wielu producentów.\n\n### ZASADY GENEROWANIA OPISU (To jest format Twojej odpowiedzi)\n\n1.  **TREŚĆ OPISU:**\n    * **Jeśli producent jest ustalony (Zgodność 100%):** Wspomnij o nim w opisie (np. \"Jest to produkt firmy XXX...\"). Trzymaj się jego danych technicznych.\n    * **Jeśli producent jest 'Nieustalony':** Stwórz ogólny opis techniczny i **MUSISZ** zawrzeć w nim wyraźne zdanie dla klienta, np. \"**Produkt jest znormalizowanym elementem infrastruktury, specyfikacja nie wskazuje jednoznacznie na jednego producenta.**\" lub \"**Jest to produkt zgodny ze standardem SKR-2, oferowany przez różnych dostawców.**\"\n\n2.  **ZACHOWANIE PARAMETRÓW:**\n    * \"Przybliżony opis\" zawiera listę parametrów. **MUSISZ ZACHOWAĆ WSZYSTKIE** te parametry w nowym opisie. Mogą być wplecione w tekst lub jako lista (Markdown). Klient zgłaszał, że parametry były gubione – to niedopuszczalne.\n\n3.  **CZYSTY TEKST (BEZ CYTATÓW):**\n    * **ABSOLUTNIE nie umieszczaj żadnych znaczników cytatów**, odnośników, linków ani artefaktów typu `[1]`, `[źródło]`.\n\n4.  **FORMATOWANIE (MARKDOWN):**\n    * **Używaj formatowania Markdown** aby tekst był czytelny dla klienta i gotowy pod SEO.\n    * **Stosuj pogrubienia (Markdown: `**tekst**`)** dla kluczowych parametrów lub nazw.\n    * **Listy wypunktowane twórz ZAWSZE używając gwiazdki (Markdown: `* Punkt pierwszy`).** Nie używaj tagów HTML `<br>`, `<ul>` ani `<li>`.\n    * Stosuj zasady gramatyczne języka polskiego.\n    * Na końcu opisu dodaj trzy trafne pytania i odpowiedzi (FAQ) dla poprawy SEO (chyba że \"Dodatkowe instrukcje\" z Zasady 1 stanowią inaczej).\n\n[START META-INSTRUKCJI PRZYPOMINAJĄCEJ]\nPRZYPOMNIENIE: Twoja finalna odpowiedź NIE MOŻE zawierać słów \"KROK 1\", \"WEWNĘTRZNA LOGIKA\", \"---\" ani \"ANALIZA\". Ma to być WYŁĄCZNIE gotowy do skopiowania tekst opisu produktu w Markdown, zaczynający się od tytułu lub pierwszego akapitu.\n[KONIEC META-INSTRUKCJI PRZYPOMINAJĄCEJ]",
+              "role": "system"
+            },
+            {
+              "content": "=Adres w sklepie: {{ $json.fields.URL }}\nNazwa produktu: {{ $('Code in JavaScript').item.json.name }}\nPrzybliżony opis: {{ $('Code in JavaScript').item.json.description }}\nDodatkowe instrukcje: {{ $('Search records').item.json['Dodatkowe instrukcje dla automatyzacji'] || 'Brak' }}"
+            }
+          ]
+        },
+        "simplify": true,
+        "options": {
+          "temperature": 0.2
+        },
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-base.perplexity",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        0
+      ],
+      "id": "565490f3-974f-4b33-abe0-6ebdc79bd027",
+      "name": "Message a model",
+      "credentials": {
+        "perplexityApi": {
+          "id": "3BVD923oj7y9kSrQ",
+          "name": "Perplexity account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search records').item.json.id }}",
+            "Opis": "={{ $json.name }}\n\n{{ $json.description }}",
+            "Status": "W toku"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis",
+              "displayName": "Opis",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Generuj opis",
+                  "value": "Generuj opis"
+                },
+                {
+                  "name": "W toku",
+                  "value": "W toku"
+                },
+                {
+                  "name": "Zrobione",
+                  "value": "Zrobione"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis rozszerzony",
+              "displayName": "Opis rozszerzony",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Uwagi do opisu",
+              "displayName": "Uwagi do opisu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Created time",
+              "displayName": "Created time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Last modified time",
+              "displayName": "Last modified time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1056,
+        0
+      ],
+      "id": "41d5de6b-db3e-4a95-b710-c3364ae0905f",
+      "name": "Update record",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search records').item.json.id }}",
+            "Status": "Zrobione",
+            "Opis rozszerzony": "={{ $json.message }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Opis",
+              "displayName": "Opis",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Generuj opis",
+                  "value": "Generuj opis"
+                },
+                {
+                  "name": "W toku",
+                  "value": "W toku"
+                },
+                {
+                  "name": "Zrobione",
+                  "value": "Zrobione"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis rozszerzony",
+              "displayName": "Opis rozszerzony",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Uwagi do opisu",
+              "displayName": "Uwagi do opisu",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Created time",
+              "displayName": "Created time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Last modified time",
+              "displayName": "Last modified time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "f1d49d47-174e-4ec6-bc3c-3cec2142cae3",
+      "name": "Update record1",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "6d466248-b24d-4064-b383-bdbb672a3260",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7d50c86d-1d68-4680-91b9-b3fa10e927e8",
+      "name": "Webhook",
+      "webhookId": "6d466248-b24d-4064-b383-bdbb672a3260"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        16,
+        240
+      ],
+      "id": "b450f472-a594-4731-bc97-a2620172e16e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search records').item.json.id }}",
+            "Status": "Błąd"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Plik Excel",
+              "displayName": "Plik Excel",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Dodatkowe instrukcje dla automatyzacji",
+              "displayName": "Dodatkowe instrukcje dla automatyzacji",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis",
+              "displayName": "Opis",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Przetwórz plik Excel",
+                  "value": "Przetwórz plik Excel"
+                },
+                {
+                  "name": "Generuj opis",
+                  "value": "Generuj opis"
+                },
+                {
+                  "name": "W toku",
+                  "value": "W toku"
+                },
+                {
+                  "name": "Zrobione",
+                  "value": "Zrobione"
+                },
+                {
+                  "name": "Błąd pliku",
+                  "value": "Błąd pliku"
+                },
+                {
+                  "name": "Błąd",
+                  "value": "Błąd"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis rozszerzony",
+              "displayName": "Opis rozszerzony",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Created time",
+              "displayName": "Created time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            },
+            {
+              "id": "Last modified time",
+              "displayName": "Last modified time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1056,
+        160
+      ],
+      "id": "274d1cbb-f1ad-4819-b5e5-677ecfd99585",
+      "name": "Update record2",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Search records": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Update record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update record2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update record": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Update record1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "ZFFqDmBmdeLnJfSJ"
+  },
+  "versionId": "2b60d2bb-7729-49ce-ace4-89b30f2708f5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ec64976a0c46f3969fd3c5b8b20605022a6eddbb7cbfbdcc2300ac0ab6d067a0"
+  },
+  "id": "blUIOwD0ZFDiEPIE",
+  "tags": [
+    {
+      "updatedAt": "2025-10-15T07:04:58.287Z",
+      "createdAt": "2025-10-15T07:04:58.287Z",
+      "id": "QI3YeM5YbvKdWDhB",
+      "name": "POLTEL"
+    }
+  ]
+}

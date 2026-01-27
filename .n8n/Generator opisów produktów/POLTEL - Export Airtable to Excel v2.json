@@ -1,0 +1,539 @@
+{
+  "name": "POLTEL - Export Airtable to Excel v2",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "export-excel-products",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "webhookId": "export-excel-products"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "id": "manual-trigger",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = 'Eksportuj dane do pliku'",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [220, 100],
+      "id": "search-export-request",
+      "name": "Search Export Request",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = 'Zrobione'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [660, 100],
+      "id": "fetch-done-records",
+      "name": "Fetch Done Records",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-has-records",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [880, 100],
+      "id": "check-has-records",
+      "name": "Check Has Records"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "url-field",
+              "name": "URL",
+              "value": "={{ $json.URL }}",
+              "type": "string"
+            },
+            {
+              "id": "opis-field",
+              "name": "Nazwa produktu",
+              "value": "={{ $json.Opis ? $json.Opis.split('\\n')[0] : '' }}",
+              "type": "string"
+            },
+            {
+              "id": "opis-rozszerzony-field",
+              "name": "Opis rozszerzony",
+              "value": "={{ $json['Opis rozszerzony'] }}",
+              "type": "string"
+            },
+            {
+              "id": "created-field",
+              "name": "Data utworzenia",
+              "value": "={{ $json.createdTime }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, 0],
+      "id": "prepare-export-data",
+      "name": "Prepare Export Data"
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {
+          "fileName": "=eksport_opisy_produktow_{{ $now.format('yyyy-MM-dd_HH-mm') }}.xlsx",
+          "sheetName": "Opisy produktów",
+          "headerRow": true
+        }
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 4.5,
+      "position": [1320, 0],
+      "id": "create-excel-file",
+      "name": "Create Excel File"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "=eksport_opisy_produktow_{{ $now.format('yyyy-MM-dd_HH-mm') }}.xlsx",
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "root"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1540, 0],
+      "id": "upload-to-drive",
+      "name": "Upload to Google Drive",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4TS236pWHJth4hMv",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1760, 0],
+      "id": "share-file",
+      "name": "Share File",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4TS236pWHJth4hMv",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search Export Request').first().json.id }}",
+            "Status": "Plik eksportu wysłany",
+            "Opis rozszerzony": "=Plik eksportu dostępny pod adresem:\n{{ $('Upload to Google Drive').first().json.webViewLink }}\n\nLub do pobrania:\n{{ $('Upload to Google Drive').first().json.webContentLink }}",
+            "Uwagi do działania automatyzacji (komentarz)": "=Wyeksportowano {{ $('Fetch Done Records').all().length }} rekordów do pliku Excel."
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options"
+            },
+            {
+              "id": "Opis rozszerzony",
+              "displayName": "Opis rozszerzony",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1980, 0],
+      "id": "update-export-success",
+      "name": "Update Export Status",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search Export Request').first().json.id }}",
+            "Status": "Błąd",
+            "Uwagi do działania automatyzacji (komentarz)": "Brak rekordów ze statusem 'Zrobione' do eksportu."
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options"
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1100, 200],
+      "id": "update-no-records-error",
+      "name": "Update - No Records Error",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "spreadsheet",
+        "title": "=Eksport Generator opisów produktowych {{ $now.format('yyyy-MM-dd HH:mm') }}",
+        "sheetsUi": {
+          "sheetValues": [
+            {
+              "title": "Opisy produktów"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [440, 100],
+      "id": "create-spreadsheet",
+      "name": "Create Spreadsheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OJytt6TIgIZyRvqG",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Search Export Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Search Export Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Export Request": {
+      "main": [
+        [
+          {
+            "node": "Create Spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Fetch Done Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Done Records": {
+      "main": [
+        [
+          {
+            "node": "Check Has Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Has Records": {
+      "main": [
+        [
+          {
+            "node": "Prepare Export Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update - No Records Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Export Data": {
+      "main": [
+        [
+          {
+            "node": "Create Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Excel File": {
+      "main": [
+        [
+          {
+            "node": "Upload to Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Share File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Share File": {
+      "main": [
+        [
+          {
+            "node": "Update Export Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "new-export-excel-workflow-v2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ec64976a0c46f3969fd3c5b8b20605022a6eddbb7cbfbdcc2300ac0ab6d067a0"
+  },
+  "id": "new-export-excel-v2",
+  "tags": [
+    {
+      "id": "QI3YeM5YbvKdWDhB",
+      "name": "POLTEL"
+    }
+  ]
+}

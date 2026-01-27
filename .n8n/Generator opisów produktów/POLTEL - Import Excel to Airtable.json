@@ -1,0 +1,535 @@
+{
+  "name": "POLTEL - Import Excel to Airtable",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "import-excel-products",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "webhookId": "import-excel-products"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "id": "manual-trigger",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = 'Przetwórz plik Excel'",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [220, 100],
+      "id": "search-excel-records",
+      "name": "Search Excel Records",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-excel-file",
+              "leftValue": "={{ $json['Plik Excel'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 100],
+      "id": "check-has-excel",
+      "name": "Check Has Excel File"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json['Plik Excel'][0].url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "id": "download-excel",
+      "name": "Download Excel File"
+    },
+    {
+      "parameters": {
+        "operation": "fromFile",
+        "options": {
+          "headerRow": true,
+          "sheetName": {
+            "mode": "list",
+            "value": ""
+          }
+        }
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 4.5,
+      "position": [880, 0],
+      "id": "parse-excel",
+      "name": "Parse Excel File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Przetwarzamy dane z Excel i przygotowujemy rekordy do utworzenia w Airtable\nconst items = $input.all();\nconst parentRecordId = $('Search Excel Records').first().json.id;\nconst additionalInstructions = $('Search Excel Records').first().json['Dodatkowe instrukcje dla automatyzacji'] || '';\n\nconst records = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Szukamy URL w różnych możliwych nazwach kolumn (case-insensitive)\n  const urlKeys = ['URL', 'url', 'Url', 'Link', 'link', 'Link do produktu', 'Adres URL'];\n  let url = null;\n  \n  for (const key of urlKeys) {\n    if (data[key]) {\n      url = data[key];\n      break;\n    }\n  }\n  \n  // Pomijamy wiersze bez URL\n  if (!url || url.trim() === '') {\n    continue;\n  }\n  \n  // Szukamy dodatkowych instrukcji specyficznych dla wiersza\n  const instructionKeys = ['Instrukcje', 'instrukcje', 'Dodatkowe instrukcje', 'Notes', 'Uwagi'];\n  let rowInstructions = '';\n  \n  for (const key of instructionKeys) {\n    if (data[key]) {\n      rowInstructions = data[key];\n      break;\n    }\n  }\n  \n  // Łączymy instrukcje z głównego rekordu i wiersza Excel\n  const combinedInstructions = [additionalInstructions, rowInstructions]\n    .filter(i => i && i.trim() !== '')\n    .join('\\n\\n');\n  \n  records.push({\n    json: {\n      URL: url.trim(),\n      Status: 'Generuj opis',\n      'Dodatkowe instrukcje dla automatyzacji': combinedInstructions,\n      'Uwagi do działania automatyzacji (komentarz)': `Import z pliku Excel (rekord źródłowy: ${parentRecordId})`\n    }\n  });\n}\n\nif (records.length === 0) {\n  throw new Error('Nie znaleziono żadnych URL-i w pliku Excel. Upewnij się, że plik zawiera kolumnę \"URL\" lub \"Link\".');\n}\n\nreturn records;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0],
+      "id": "prepare-records",
+      "name": "Prepare Records for Airtable",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1320, 0],
+      "id": "create-records",
+      "name": "Create Product Records",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1540, 0],
+      "id": "aggregate-created",
+      "name": "Aggregate Created Records"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search Excel Records').first().json.id }}",
+            "Status": "Plik przetworzony",
+            "Uwagi do działania automatyzacji (komentarz)": "=Utworzono {{ $json.id.length }} rekordów produktów do przetworzenia."
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options"
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1760, 0],
+      "id": "update-parent-success",
+      "name": "Update Parent - Success",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search Excel Records').first().json.id }}",
+            "Status": "Błąd pliku",
+            "Uwagi do działania automatyzacji (komentarz)": "Brak załączonego pliku Excel lub plik jest pusty."
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options"
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [660, 200],
+      "id": "update-no-file-error",
+      "name": "Update - No File Error",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search Excel Records').first().json.id }}",
+            "Status": "Błąd pliku",
+            "Uwagi do działania automatyzacji (komentarz)": "=Błąd przetwarzania pliku Excel: {{ $json.message || 'Nieznany błąd' }}"
+          },
+          "matchingColumns": ["id"],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options"
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1320, 200],
+      "id": "update-parse-error",
+      "name": "Update - Parse Error",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Search Excel Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Search Excel Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Excel Records": {
+      "main": [
+        [
+          {
+            "node": "Check Has Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Has Excel File": {
+      "main": [
+        [
+          {
+            "node": "Download Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update - No File Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Excel File": {
+      "main": [
+        [
+          {
+            "node": "Parse Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Excel File": {
+      "main": [
+        [
+          {
+            "node": "Prepare Records for Airtable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Records for Airtable": {
+      "main": [
+        [
+          {
+            "node": "Create Product Records",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update - Parse Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Product Records": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Created Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Created Records": {
+      "main": [
+        [
+          {
+            "node": "Update Parent - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "new-import-excel-workflow",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ec64976a0c46f3969fd3c5b8b20605022a6eddbb7cbfbdcc2300ac0ab6d067a0"
+  },
+  "id": "new-import-excel",
+  "tags": [
+    {
+      "id": "QI3YeM5YbvKdWDhB",
+      "name": "POLTEL"
+    }
+  ]
+}

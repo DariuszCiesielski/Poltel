@@ -1,0 +1,590 @@
+{
+  "name": "POLTEL - Export Airtable to Excel",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = 'Zrobione'",
+        "options": {}
+      },
+      "id": "d55f3624-588d-4c30-b530-e26ff612fc84",
+      "name": "Fetch All Records from Table",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1312,
+        160
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "spreadsheet",
+        "title": "Eksport Generator opisów produktowych",
+        "sheetsUi": {
+          "sheetValues": [
+            {
+              "title": "Arkusz 1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1104,
+        160
+      ],
+      "id": "f50f8e3d-1bdf-4496-a525-d6b2e7dc1e1f",
+      "name": "Create spreadsheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OJytt6TIgIZyRvqG",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "2aaa5c72-480d-4e0b-9128-efced5414d5c",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        384,
+        160
+      ],
+      "id": "e8139a1a-c682-4f2d-8f03-ce2619b8ac84",
+      "name": "Webhook",
+      "webhookId": "2aaa5c72-480d-4e0b-9128-efced5414d5c"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        432,
+        304
+      ],
+      "id": "a4df2d08-d624-4a61-b548-401e139e1475",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').item.json.spreadsheetUrl }}",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Create spreadsheet').item.json.sheets[0].properties.title }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1680,
+        160
+      ],
+      "id": "4c6fc54c-613e-4a3e-8dc7-2b48d5301ab8",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OJytt6TIgIZyRvqG",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1e9c5382-3f82-4365-b0e3-00144872fad8",
+              "name": "URL",
+              "value": "={{ $('Fetch All Records from Table').item.json.URL }}",
+              "type": "string"
+            },
+            {
+              "id": "2ba617c2-f33c-4066-a242-26016a5e892b",
+              "name": "Opis rozszerzony",
+              "value": "={{ $('Fetch All Records from Table').item.json['Opis rozszerzony'] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1488,
+        160
+      ],
+      "id": "ff01593f-4e51-4a72-af49-46668cf0e47a",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "filterByFormula": "{Status} = 'Eksportuj dane do pliku'",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        160
+      ],
+      "id": "314629a8-f74e-4a4c-af43-8a2e17d3201b",
+      "name": "Search records",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "prozga@poltel.com.pl",
+        "subject": "Plik eksportu z automatyzacji Generator opisów produktowych",
+        "message": "={{ $('Create spreadsheet').item.json.spreadsheetUrl }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2720,
+        160
+      ],
+      "id": "5af47fcf-d8f3-49c3-8572-7faf31595e37",
+      "name": "Send a message",
+      "webhookId": "d03c6c3d-c3a7-4103-ac69-2f1464335f3b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "No0p9Ht9yELsccun",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "URL"
+            },
+            {
+              "fieldToAggregate": "Opis rozszerzony"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1888,
+        160
+      ],
+      "id": "122e9414-a9d0-431f-9771-3853c57db302",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Create spreadsheet').item.json.spreadsheetUrl }}",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2304,
+        160
+      ],
+      "id": "74103236-4415-4251-9832-1f160b185d80",
+      "name": "Share file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4TS236pWHJth4hMv",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appPpJLVHoqrxXuiQ",
+          "mode": "list",
+          "cachedResultName": "POLTEL",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblFES6uAnqEyI5GU",
+          "mode": "list",
+          "cachedResultName": "Generator opisów produktowych",
+          "cachedResultUrl": "https://airtable.com/appPpJLVHoqrxXuiQ/tblFES6uAnqEyI5GU"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Search records').item.json.id }}",
+            "Status": "Plik eksportu wysłany"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "URL",
+              "displayName": "URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Plik Excel",
+              "displayName": "Plik Excel",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "array",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Dodatkowe instrukcje dla automatyzacji",
+              "displayName": "Dodatkowe instrukcje dla automatyzacji",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Opis",
+              "displayName": "Opis",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Przetwórz plik Excel",
+                  "value": "Przetwórz plik Excel"
+                },
+                {
+                  "name": "Generuj opis",
+                  "value": "Generuj opis"
+                },
+                {
+                  "name": "W toku",
+                  "value": "W toku"
+                },
+                {
+                  "name": "Zrobione",
+                  "value": "Zrobione"
+                },
+                {
+                  "name": "Błąd pliku",
+                  "value": "Błąd pliku"
+                },
+                {
+                  "name": "Błąd",
+                  "value": "Błąd"
+                },
+                {
+                  "name": "Eksportuj dane do pliku",
+                  "value": "Eksportuj dane do pliku"
+                },
+                {
+                  "name": "Plik eksportu wysłany",
+                  "value": "Plik eksportu wysłany"
+                }
+              ],
+              "readOnly": false
+            },
+            {
+              "id": "Opis rozszerzony",
+              "displayName": "Opis rozszerzony",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Uwagi do działania automatyzacji (komentarz)",
+              "displayName": "Uwagi do działania automatyzacji (komentarz)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false
+            },
+            {
+              "id": "Created time",
+              "displayName": "Created time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Last modified time",
+              "displayName": "Last modified time",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8bae7427-d5df-43b5-948f-e98933248957",
+      "name": "Update Status",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2992,
+        160
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "4FUKb9LoIYrvG34e",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fetch All Records from Table": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Search records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Records from Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search records": {
+      "main": [
+        [
+          {
+            "node": "Create spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Share file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Share file": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7d3bd0ea-f9d6-4d66-951e-5dc031e88b2a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ec64976a0c46f3969fd3c5b8b20605022a6eddbb7cbfbdcc2300ac0ab6d067a0"
+  },
+  "id": "gxZ7fl1owZSpCGqT",
+  "tags": []
+}
