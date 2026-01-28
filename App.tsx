@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { AirtableService } from './services/airtableService';
 import { AUTOMATION_TOOLS, STATUS_FIELD_NAME, PRODUCT_DESC_STATUSES } from './constants';
-import { AirtableRecord, AirtableRecordFields } from './types';
+import { AirtableRecord, AirtableRecordFields, AirtableFieldSchema, ToolFieldsConfig, ToolFieldsOrderConfig } from './types';
+import { useAuth } from './contexts/AuthContext';
 import {
   Settings,
   Plus,
@@ -32,7 +33,9 @@ import {
   Send,
   FileDown,
   Columns,
-  X
+  X,
+  LogOut,
+  GripVertical
 } from 'lucide-react';
 
 // --- Helper Functions ---
@@ -233,6 +236,9 @@ ${content}
 // --- Main App ---
 
 export default function App() {
+  // Auth State
+  const { user, signOut } = useAuth();
+
   // Configuration State - prioritize localStorage, fallback to env vars
   const [apiKey, setApiKey] = useState(
     localStorage.getItem('AT_API_KEY') || import.meta.env.VITE_AIRTABLE_API_KEY || ''
@@ -266,6 +272,24 @@ export default function App() {
   const [formData, setFormData] = useState<AirtableRecordFields>({});
   const [selectedInputMode, setSelectedInputMode] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [visibleOptionalFields, setVisibleOptionalFields] = useState<Set<string>>(new Set());
+  const [showAddFieldDropdown, setShowAddFieldDropdown] = useState(false);
+
+  // --- Airtable Schema State ---
+  const [airtableFields, setAirtableFields] = useState<AirtableFieldSchema[]>([]);
+  const [isLoadingSchema, setIsLoadingSchema] = useState(false);
+  const [savedFieldsConfig, setSavedFieldsConfig] = useState<ToolFieldsConfig>(() => {
+    const saved = localStorage.getItem('POLTEL_TOOL_FIELDS_CONFIG');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [savedFieldsOrder, setSavedFieldsOrder] = useState<ToolFieldsOrderConfig>(() => {
+    const saved = localStorage.getItem('POLTEL_TOOL_FIELDS_ORDER');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  // --- Form Field Drag State ---
+  const [draggedFormField, setDraggedFormField] = useState<string | null>(null);
+  const [dragOverFormField, setDragOverFormField] = useState<string | null>(null);
 
   const activeTool = AUTOMATION_TOOLS.find(t => t.id === activeToolId);
   const airtable = new AirtableService(apiKey, baseId);
@@ -296,6 +320,14 @@ export default function App() {
   const MIN_MODAL_WIDTH = 400;
   const MAX_MODAL_WIDTH = 1600;
 
+  // --- Create Form Modal Resize State ---
+  const [createModalWidth, setCreateModalWidth] = useState(672); // Domyślna szerokość (max-w-2xl = 672px)
+  const [createModalHeight, setCreateModalHeight] = useState(600); // Domyślna wysokość
+  const MIN_CREATE_MODAL_WIDTH = 400;
+  const MAX_CREATE_MODAL_WIDTH = 1200;
+  const MIN_CREATE_MODAL_HEIGHT = 300;
+  const MAX_CREATE_MODAL_HEIGHT = window.innerHeight * 0.9;
+
   // Refs do przechowywania aktualnych wartości dla event handlers (unika problemu z closure)
   const dragFillSourceRef = useRef<{ recordId: string; columnKey: string; value: string } | null>(null);
   const dragFillTargetRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
@@ -303,7 +335,15 @@ export default function App() {
   const resizingColumn = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizingRow = useRef<{ startY: number; startHeight: number } | null>(null);
   const resizingModal = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+  const resizingCreateModal = useRef<{
+    side: 'left' | 'right' | 'top' | 'bottom' | 'corner-bl' | 'corner-br';
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number
+  } | null>(null);
   const lastModalRecordId = useRef<string | null>(null); // Śledzenie ID rekordu w modalu
+  const addFieldDropdownRef = useRef<HTMLDivElement>(null); // Ref dla dropdown "Dodaj pole"
 
   // Domyślne szerokości kolumn
   const getColumnWidth = (key: string, type?: string) => {
@@ -398,6 +438,70 @@ export default function App() {
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
     document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Obsługa zmiany rozmiaru modalu tworzenia
+  const handleCreateModalResizeStart = (
+    e: React.MouseEvent,
+    side: 'left' | 'right' | 'top' | 'bottom' | 'corner-bl' | 'corner-br'
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingCreateModal.current = {
+      side,
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: createModalWidth,
+      startHeight: createModalHeight
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingCreateModal.current) return;
+      const diffX = moveEvent.clientX - resizingCreateModal.current.startX;
+      const diffY = moveEvent.clientY - resizingCreateModal.current.startY;
+      const { side, startWidth, startHeight } = resizingCreateModal.current;
+
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+
+      // Zmiana szerokości
+      if (side === 'left' || side === 'corner-bl') {
+        newWidth = Math.max(MIN_CREATE_MODAL_WIDTH, Math.min(MAX_CREATE_MODAL_WIDTH, startWidth - diffX * 2));
+      } else if (side === 'right' || side === 'corner-br') {
+        newWidth = Math.max(MIN_CREATE_MODAL_WIDTH, Math.min(MAX_CREATE_MODAL_WIDTH, startWidth + diffX * 2));
+      }
+
+      // Zmiana wysokości
+      if (side === 'top') {
+        newHeight = Math.max(MIN_CREATE_MODAL_HEIGHT, Math.min(MAX_CREATE_MODAL_HEIGHT, startHeight - diffY * 2));
+      } else if (side === 'bottom' || side === 'corner-bl' || side === 'corner-br') {
+        newHeight = Math.max(MIN_CREATE_MODAL_HEIGHT, Math.min(MAX_CREATE_MODAL_HEIGHT, startHeight + diffY * 2));
+      }
+
+      setCreateModalWidth(newWidth);
+      setCreateModalHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      resizingCreateModal.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    // Ustaw odpowiedni kursor
+    if (side === 'left' || side === 'right') {
+      document.body.style.cursor = 'ew-resize';
+    } else if (side === 'top' || side === 'bottom') {
+      document.body.style.cursor = 'ns-resize';
+    } else {
+      document.body.style.cursor = 'nwse-resize';
+    }
     document.body.style.userSelect = 'none';
   };
 
@@ -522,6 +626,137 @@ export default function App() {
     }
   }, [loadRecords, viewMode, activeToolId]);
 
+  // Pobieranie schematu tabeli z Airtable
+  const loadTableSchema = useCallback(async () => {
+    if (!apiKey || !baseId || !activeTool) return;
+    setIsLoadingSchema(true);
+    try {
+      const schema = await airtable.getTableSchema(activeTool.tableName);
+      if (schema) {
+        setAirtableFields(schema.fields);
+      }
+    } catch (err) {
+      console.error('Błąd pobierania schematu:', err);
+    } finally {
+      setIsLoadingSchema(false);
+    }
+  }, [apiKey, baseId, activeTool]);
+
+  useEffect(() => {
+    if (viewMode === 'tool' && activeToolId) {
+      loadTableSchema();
+    }
+  }, [loadTableSchema, viewMode, activeToolId]);
+
+  // Inicjalizuj widoczne pola z zapisanej konfiguracji przy zmianie narzędzia
+  useEffect(() => {
+    if (activeToolId && savedFieldsConfig[activeToolId]) {
+      setVisibleOptionalFields(new Set(savedFieldsConfig[activeToolId]));
+    } else {
+      setVisibleOptionalFields(new Set());
+    }
+  }, [activeToolId, savedFieldsConfig]);
+
+  // Zamknij dropdown "Dodaj pole" przy kliknięciu poza nim
+  useEffect(() => {
+    if (!showAddFieldDropdown) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (addFieldDropdownRef.current && !addFieldDropdownRef.current.contains(event.target as Node)) {
+        setShowAddFieldDropdown(false);
+      }
+    };
+
+    // Dodaj listener z małym opóźnieniem żeby uniknąć natychmiastowego zamknięcia
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAddFieldDropdown]);
+
+  // Zapisz konfigurację pól w localStorage
+  const saveFieldsConfig = useCallback((toolId: string, fields: Set<string>) => {
+    const newConfig = { ...savedFieldsConfig, [toolId]: Array.from(fields) };
+    setSavedFieldsConfig(newConfig);
+    localStorage.setItem('POLTEL_TOOL_FIELDS_CONFIG', JSON.stringify(newConfig));
+  }, [savedFieldsConfig]);
+
+  // Zapisz kolejność pól w localStorage
+  const saveFieldsOrder = useCallback((toolId: string, order: string[]) => {
+    const newOrder = { ...savedFieldsOrder, [toolId]: order };
+    setSavedFieldsOrder(newOrder);
+    localStorage.setItem('POLTEL_TOOL_FIELDS_ORDER', JSON.stringify(newOrder));
+  }, [savedFieldsOrder]);
+
+  // Pobierz posortowaną listę pól formularza
+  const getOrderedFormFields = useCallback(() => {
+    if (!activeTool) return [];
+
+    // Zbierz wszystkie widoczne pola
+    const visibleFields: { key: string; label: string; isFromConfig: boolean; field?: typeof activeTool.inputFields[0] }[] = [];
+
+    // Pola z konfiguracji
+    activeTool.inputFields.forEach(field => {
+      if (field.showForMode && field.showForMode !== selectedInputMode) return;
+      if (field.optional && !visibleOptionalFields.has(field.key)) return;
+      visibleFields.push({ key: field.key, label: field.label, isFromConfig: true, field });
+    });
+
+    // Pola dodane z Airtable
+    const inputFieldKeys = new Set(activeTool.inputFields.map(f => f.key.toLowerCase()));
+    Array.from(visibleOptionalFields)
+      .filter(key => !inputFieldKeys.has(key.toLowerCase()))
+      .forEach(key => {
+        const airtableField = airtableFields.find(f => f.name === key);
+        visibleFields.push({ key, label: key, isFromConfig: false, field: undefined });
+      });
+
+    // Zastosuj zapisaną kolejność
+    const savedOrder = savedFieldsOrder[activeTool.id];
+    if (savedOrder && savedOrder.length > 0) {
+      visibleFields.sort((a, b) => {
+        const indexA = savedOrder.indexOf(a.key);
+        const indexB = savedOrder.indexOf(b.key);
+        // Pola nieznajdujące się w zapisanej kolejności idą na koniec
+        if (indexA === -1 && indexB === -1) return 0;
+        if (indexA === -1) return 1;
+        if (indexB === -1) return -1;
+        return indexA - indexB;
+      });
+    }
+
+    return visibleFields;
+  }, [activeTool, selectedInputMode, visibleOptionalFields, airtableFields, savedFieldsOrder]);
+
+  // Obsługa drop pola formularza
+  const handleFormFieldDrop = useCallback((targetKey: string) => {
+    if (!draggedFormField || !activeTool || draggedFormField === targetKey) {
+      setDraggedFormField(null);
+      setDragOverFormField(null);
+      return;
+    }
+
+    const orderedFields = getOrderedFormFields();
+    const fieldKeys = orderedFields.map(f => f.key);
+
+    const fromIndex = fieldKeys.indexOf(draggedFormField);
+    const toIndex = fieldKeys.indexOf(targetKey);
+
+    if (fromIndex !== -1 && toIndex !== -1) {
+      // Przesuń element
+      fieldKeys.splice(fromIndex, 1);
+      fieldKeys.splice(toIndex, 0, draggedFormField);
+      saveFieldsOrder(activeTool.id, fieldKeys);
+    }
+
+    setDraggedFormField(null);
+    setDragOverFormField(null);
+  }, [draggedFormField, activeTool, getOrderedFormFields, saveFieldsOrder]);
+
   // Inicjalizacja danych modalu gdy otworzymy NOWY rekord (nie przy każdym renderze)
   useEffect(() => {
     if (selectedRecord && activeTool) {
@@ -610,27 +845,51 @@ export default function App() {
   };
 
   const initCreateForm = () => {
-    setFormData({});
     setEditingRecordId(null);
     setSelectedRecord(null);
     setSelectedFile(null);
-    // Ustaw domyślny tryb wejścia jeśli narzędzie ma tryby
+    // Przywróć zapisaną konfigurację pól lub ustaw pustą
+    if (activeTool && savedFieldsConfig[activeTool.id]) {
+      setVisibleOptionalFields(new Set(savedFieldsConfig[activeTool.id]));
+    } else {
+      setVisibleOptionalFields(new Set());
+    }
+    setShowAddFieldDropdown(false);
+
+    // Ustaw domyślny tryb wejścia i status
+    let defaultStatus = 'Generuj opis'; // Domyślny status
     if (activeTool?.inputModes && activeTool.inputModes.length > 0) {
       setSelectedInputMode(activeTool.inputModes[0].id);
+      defaultStatus = activeTool.inputModes[0].initialStatus;
     } else {
       setSelectedInputMode('');
     }
+
+    // Ustaw formData z domyślnym statusem
+    setFormData({ Status: defaultStatus });
     setShowForm(true);
   };
 
   const initEditForm = (record: AirtableRecord) => {
     const newFormData: AirtableRecordFields = {};
     if (activeTool) {
+        // Załaduj wartości dla pól z konfiguracji
         activeTool.inputFields.forEach(field => {
-            // Use getFieldValue to find data even if case mismatches
             const val = getFieldValue(record, field.key);
             if (val !== undefined) {
                 newFormData[field.key] = val;
+            }
+        });
+
+        // Załaduj wartości dla pól dodanych z Airtable (zapisanych w konfiguracji)
+        const savedFields = savedFieldsConfig[activeTool.id] || [];
+        savedFields.forEach(fieldKey => {
+            // Pomiń pola które są już w inputFields
+            if (!activeTool.inputFields.some(f => f.key.toLowerCase() === fieldKey.toLowerCase())) {
+                const val = getFieldValue(record, fieldKey);
+                if (val !== undefined) {
+                    newFormData[fieldKey] = val;
+                }
             }
         });
     }
@@ -1095,7 +1354,7 @@ export default function App() {
     }
   };
 
-  const handleInputChange = (key: string, value: string) => {
+  const handleInputChange = (key: string, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [key]: value }));
   };
 
@@ -1223,13 +1482,23 @@ export default function App() {
                   Centralny panel automatyzacji procesów contentowych i analitycznych.
                 </p>
               </div>
-              <button 
-                onClick={() => setShowSettings(true)}
-                className="flex items-center gap-2 text-sm bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg transition-all border border-white/10"
-              >
-                <Settings className="w-4 h-4" />
-                Konfiguracja
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="flex items-center gap-2 text-sm bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg transition-all border border-white/10"
+                >
+                  <Settings className="w-4 h-4" />
+                  Konfiguracja
+                </button>
+                <button
+                  onClick={signOut}
+                  className="flex items-center gap-2 text-sm bg-white/10 hover:bg-rose-500/80 backdrop-blur-md text-white px-4 py-2 rounded-lg transition-all border border-white/10"
+                  title={`Wyloguj (${user?.email})`}
+                >
+                  <LogOut className="w-4 h-4" />
+                  Wyloguj
+                </button>
+              </div>
             </div>
           </div>
         </header>
@@ -1257,7 +1526,7 @@ export default function App() {
                   {tool.icon}
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-3 group-hover:text-blue-600 transition-colors">
-                  {tool.label}
+                  {tool.tableName}
                 </h3>
                 <p className="text-slate-500 text-sm leading-relaxed mb-6">
                   {tool.description}
@@ -1358,7 +1627,7 @@ export default function App() {
                   }`}
                 >
                   {tool.icon}
-                  <span className="font-medium truncate">{tool.label}</span>
+                  <span className="font-medium truncate">{tool.tableName}</span>
                 </button>
               ))}
             </nav>
@@ -1380,7 +1649,7 @@ export default function App() {
           <div className="flex items-center gap-4">
              <div className="h-8 w-px bg-slate-200 hidden md:block"></div>
              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-               {activeTool?.label}
+               {activeTool?.tableName}
              </h2>
           </div>
           <div className="flex gap-2">
@@ -1446,7 +1715,7 @@ export default function App() {
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-all active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Nowe Zadanie</span>
+              <span className="hidden sm:inline">{activeTool?.newRecordLabel || 'Nowe zadanie'}</span>
             </button>
           </div>
         </header>
@@ -2432,23 +2701,114 @@ export default function App() {
             </div>
           )}
 
-          {/* Create/Edit Form Panel */}
-          <div className={`${showForm ? 'flex' : 'hidden'} flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 justify-center items-start`}>
-            
-            {/* Create/Edit Form */}
-            {showForm && activeTool && (
-              <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-lg border border-slate-200 flex flex-col h-full md:h-auto animate-in slide-in-from-bottom-4 duration-300">
-                <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
-                    <div>
-                        <h3 className="text-lg font-bold text-slate-800">
-                            {editingRecordId ? 'Edytuj Zadanie' : 'Nowe Zadanie'}
-                        </h3>
-                        <p className="text-slate-400 text-xs">{activeTool.label}</p>
-                    </div>
-                    <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-full">✕</button>
+          {/* Create Form Modal */}
+          {showForm && activeTool && (
+            <div
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-auto"
+            >
+              <div
+                className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 relative"
+                style={{
+                  width: `${createModalWidth}px`,
+                  height: `${createModalHeight}px`,
+                  maxWidth: '95vw',
+                  maxHeight: '95vh'
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Uchwyty do resize */}
+                {/* Lewy */}
+                <div
+                  className="absolute left-0 top-4 bottom-4 w-2 cursor-ew-resize hover:bg-blue-500/20 transition-colors z-10 group"
+                  onMouseDown={e => handleCreateModalResizeStart(e, 'left')}
+                >
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-16 bg-slate-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <div className="p-6 overflow-y-auto">
-                    <form id="automation-form" onSubmit={handleSubmit} className="space-y-5">
+                {/* Prawy */}
+                <div
+                  className="absolute right-0 top-4 bottom-4 w-2 cursor-ew-resize hover:bg-blue-500/20 transition-colors z-10 group"
+                  onMouseDown={e => handleCreateModalResizeStart(e, 'right')}
+                >
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-16 bg-slate-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                {/* Dolny */}
+                <div
+                  className="absolute bottom-0 left-4 right-4 h-2 cursor-ns-resize hover:bg-blue-500/20 transition-colors z-10 group"
+                  onMouseDown={e => handleCreateModalResizeStart(e, 'bottom')}
+                >
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 h-1 w-16 bg-slate-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                {/* Róg dolny prawy */}
+                <div
+                  className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize hover:bg-blue-500/20 transition-colors z-20"
+                  onMouseDown={e => handleCreateModalResizeStart(e, 'corner-br')}
+                />
+                {/* Róg dolny lewy */}
+                <div
+                  className="absolute bottom-0 left-0 w-4 h-4 cursor-nesw-resize hover:bg-blue-500/20 transition-colors z-20"
+                  onMouseDown={e => handleCreateModalResizeStart(e, 'corner-bl')}
+                />
+
+                {/* Modal Header */}
+                <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 rounded-t-2xl flex-shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">
+                      {activeTool.newRecordLabel || 'Nowe zadanie'}
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{activeTool.tableName}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {/* Status w nagłówku */}
+                    {(() => {
+                      const currentStatus = String(formData.Status || '');
+                      const statusColors = getStatusColors(currentStatus);
+                      return (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            className={`text-sm font-semibold rounded-lg border py-1.5 px-3 pr-7 cursor-pointer transition-all flex items-center gap-2 ${
+                              currentStatus
+                                ? `${statusColors.bgColor} ${statusColors.textColor} ${statusColors.borderColor}`
+                                : 'bg-white text-slate-500 border-slate-300'
+                            } hover:opacity-90`}
+                          >
+                            {currentStatus && (
+                              <span className={`w-2.5 h-2.5 rounded-full ${statusColors.bgColor} border ${statusColors.borderColor}`}></span>
+                            )}
+                            <span className="truncate max-w-[140px]">{currentStatus || 'Status...'}</span>
+                            <svg
+                              className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          <select
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                            value={currentStatus}
+                            onChange={e => handleInputChange('Status', e.target.value)}
+                          >
+                            {STATUS_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.value}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })()}
+                    <button
+                      onClick={() => setShowForm(false)}
+                      className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modal Content */}
+                <div className="flex-1 overflow-y-auto p-6 min-h-0">
+                  <form id="automation-form" onSubmit={handleSubmit} className="space-y-5">
 
                     {/* Wybór trybu wejścia */}
                     {activeTool.inputModes && activeTool.inputModes.length > 0 && !editingRecordId && (
@@ -2463,7 +2823,7 @@ export default function App() {
                               type="button"
                               onClick={() => {
                                 setSelectedInputMode(mode.id);
-                                setFormData({});
+                                setFormData({ Status: mode.initialStatus });
                                 setSelectedFile(null);
                               }}
                               className={`flex flex-col items-center p-4 rounded-xl border-2 transition-all ${
@@ -2485,110 +2845,344 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Pola formularza - filtrowane według trybu */}
-                    {activeTool.inputFields
-                      .filter(field => {
-                        if (!field.showForMode) return true;
-                        return field.showForMode === selectedInputMode;
-                      })
-                      .map(field => (
-                        <div key={field.key}>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                            {field.label} {field.required && <span className="text-red-500">*</span>}
-                          </label>
+                    {/* Pola formularza - z drag & drop do zmiany kolejności */}
+                    {getOrderedFormFields().map(({ key, label, isFromConfig, field }) => {
+                      const airtableField = !isFromConfig ? airtableFields.find(f => f.name === key) : undefined;
+                      const isOptional = isFromConfig ? field?.optional : true;
+                      const isDragging = draggedFormField === key;
+                      const isDragOver = dragOverFormField === key;
 
-                          {field.type === 'textarea' ? (
-                            <textarea
-                              required={field.required}
-                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm min-h-[140px]"
-                              placeholder={field.placeholder}
-                              value={String(formData[field.key] || '')}
-                              onChange={e => handleInputChange(field.key, e.target.value)}
-                            />
-                          ) : field.type === 'select' ? (
-                            <select
-                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 shadow-sm"
-                              value={String(formData[field.key] || '')}
-                              onChange={e => handleInputChange(field.key, e.target.value)}
-                            >
-                              <option value="">Wybierz opcję...</option>
-                              {field.options?.map(opt => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                          ) : field.type === 'file' ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center gap-3">
-                                <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all">
-                                  <Upload className="w-5 h-5 text-slate-500" />
-                                  <span className="text-sm text-slate-600">
-                                    {selectedFile ? selectedFile.name : 'Wybierz plik Excel'}
-                                  </span>
-                                  <input
-                                    type="file"
-                                    accept={field.accept}
-                                    className="hidden"
-                                    onChange={e => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        setSelectedFile(file);
-                                        // Dla Airtable potrzebujemy URL - informujemy użytkownika
-                                      }
-                                    }}
-                                  />
-                                </label>
+                      return (
+                        <div
+                          key={key}
+                          className={`relative group transition-all ${isDragging ? 'opacity-50' : ''} ${isDragOver ? 'border-t-2 border-blue-500 pt-2' : ''}`}
+                          draggable
+                          onDragStart={e => {
+                            setDraggedFormField(key);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragEnd={() => {
+                            setDraggedFormField(null);
+                            setDragOverFormField(null);
+                          }}
+                          onDragOver={e => {
+                            e.preventDefault();
+                            if (draggedFormField && draggedFormField !== key) {
+                              setDragOverFormField(key);
+                            }
+                          }}
+                          onDragLeave={() => setDragOverFormField(null)}
+                          onDrop={e => {
+                            e.preventDefault();
+                            handleFormFieldDrop(key);
+                          }}
+                        >
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-2">
+                              {/* Uchwyt do przeciągania */}
+                              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors">
+                                <GripVertical className="w-4 h-4" />
                               </div>
-                              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                <p className="text-xs text-amber-800">
-                                  <strong>Uwaga:</strong> Aby wgrać plik Excel, podaj publiczny URL do pliku
-                                  (np. link z Google Drive, Dropbox). Airtable pobierze plik automatycznie.
-                                </p>
+                              <label className="block text-sm font-semibold text-slate-700">
+                                {isFromConfig ? label : key}
+                                {isFromConfig && field?.required && <span className="text-red-500 ml-1">*</span>}
+                                {!isFromConfig && airtableField && (
+                                  <span className="ml-2 text-xs font-normal text-slate-400">({airtableField.type})</span>
+                                )}
+                              </label>
+                            </div>
+                            {isOptional && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newFields = new Set(visibleOptionalFields);
+                                  newFields.delete(key);
+                                  setVisibleOptionalFields(newFields);
+                                  saveFieldsConfig(activeTool.id, newFields);
+                                  handleInputChange(key, '');
+                                }}
+                                className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors opacity-0 group-hover:opacity-100"
+                                title="Usuń pole"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Renderowanie pola w zależności od typu */}
+                          {isFromConfig && field ? (
+                            // Pola z konfiguracji
+                            field.type === 'textarea' ? (
+                              <textarea
+                                required={field.required}
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-3 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm min-h-[140px]"
+                                placeholder={field.placeholder}
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : field.type === 'select' ? (
+                              <select
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 shadow-sm"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              >
+                                <option value="">Wybierz opcję...</option>
+                                {field.options?.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            ) : field.type === 'file' ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-3">
+                                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 border-2 border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all">
+                                    <Upload className="w-5 h-5 text-slate-500" />
+                                    <span className="text-sm text-slate-600">
+                                      {selectedFile ? selectedFile.name : 'Wybierz plik Excel'}
+                                    </span>
+                                    <input
+                                      type="file"
+                                      accept={field.accept}
+                                      className="hidden"
+                                      onChange={e => {
+                                        const file = e.target.files?.[0];
+                                        if (file) setSelectedFile(file);
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                  <p className="text-xs text-amber-800">
+                                    <strong>Uwaga:</strong> Aby wgrać plik Excel, podaj publiczny URL do pliku
+                                    (np. link z Google Drive, Dropbox). Airtable pobierze plik automatycznie.
+                                  </p>
+                                </div>
+                                <input
+                                  type="url"
+                                  required={field.required}
+                                  className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                  placeholder="https://drive.google.com/... lub https://www.dropbox.com/..."
+                                  value={String(formData[key] || '')}
+                                  onChange={e => handleInputChange(key, e.target.value)}
+                                />
                               </div>
+                            ) : (
                               <input
-                                type="url"
+                                type={field.type}
                                 required={field.required}
                                 className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
-                                placeholder="https://drive.google.com/... lub https://www.dropbox.com/..."
-                                value={String(formData[field.key] || '')}
-                                onChange={e => handleInputChange(field.key, e.target.value)}
+                                placeholder={field.placeholder}
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
                               />
-                            </div>
+                            )
                           ) : (
-                            <input
-                              type={field.type}
-                              required={field.required}
-                              className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
-                              placeholder={field.placeholder}
-                              value={String(formData[field.key] || '')}
-                              onChange={e => handleInputChange(field.key, e.target.value)}
-                            />
+                            // Pola z Airtable
+                            airtableField?.type === 'multilineText' || airtableField?.type === 'richText' ? (
+                              <textarea
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm min-h-[100px] resize-y"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : airtableField?.type === 'singleSelect' && airtableField?.options?.choices ? (
+                              <select
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              >
+                                <option value="">Wybierz...</option>
+                                {airtableField.options.choices.map((choice: { name: string }) => (
+                                  <option key={choice.name} value={choice.name}>{choice.name}</option>
+                                ))}
+                              </select>
+                            ) : airtableField?.type === 'checkbox' ? (
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  checked={Boolean(formData[key])}
+                                  onChange={e => handleInputChange(key, e.target.checked)}
+                                />
+                                <span className="text-sm text-slate-600">Tak</span>
+                              </label>
+                            ) : airtableField?.type === 'number' || airtableField?.type === 'currency' || airtableField?.type === 'percent' ? (
+                              <input
+                                type="number"
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : airtableField?.type === 'url' ? (
+                              <input
+                                type="url"
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                placeholder="https://..."
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : airtableField?.type === 'email' ? (
+                              <input
+                                type="email"
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                placeholder="email@example.com"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : airtableField?.type === 'date' || airtableField?.type === 'dateTime' ? (
+                              <input
+                                type={airtableField?.type === 'dateTime' ? 'datetime-local' : 'date'}
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                className="w-full rounded-lg border-slate-200 border bg-slate-50 p-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                                value={String(formData[key] || '')}
+                                onChange={e => handleInputChange(key, e.target.value)}
+                              />
+                            )
                           )}
                         </div>
-                    ))}
-                    </form>
+                      );
+                    })}
+
+                    {/* Przycisk "Dodaj pole" - pola z Airtable które nie są jeszcze widoczne */}
+                    {(() => {
+                      // Zbierz klucze pól już widocznych (wymagane + dodane przez użytkownika)
+                      const visibleFieldKeys = new Set<string>();
+                      activeTool.inputFields.forEach(field => {
+                        // Pola wymagane lub już widoczne
+                        if (!field.optional || visibleOptionalFields.has(field.key)) {
+                          // Sprawdź czy nie ma filtra trybu
+                          if (!field.showForMode || field.showForMode === selectedInputMode) {
+                            visibleFieldKeys.add(field.key.toLowerCase());
+                          }
+                        }
+                      });
+                      // Dodaj też pola dodane przez użytkownika z Airtable
+                      visibleOptionalFields.forEach(key => visibleFieldKeys.add(key.toLowerCase()));
+                      // Wyklucz pole Status - jest osobno
+                      visibleFieldKeys.add('status');
+
+                      // Pola z konfiguracji (optional) które jeszcze nie są widoczne
+                      const hiddenConfigFields = activeTool.inputFields.filter(field => {
+                        if (field.showForMode && field.showForMode !== selectedInputMode) return false;
+                        return field.optional && !visibleOptionalFields.has(field.key);
+                      });
+
+                      // Pola z Airtable które nie są w konfiguracji i nie są jeszcze widoczne
+                      const hiddenAirtableFields = airtableFields.filter(field => {
+                        const keyLower = field.name.toLowerCase();
+                        // Wyklucz pola już widoczne
+                        if (visibleFieldKeys.has(keyLower)) return false;
+                        // Wyklucz pola systemowe
+                        if (['created time', 'last modified time', 'created', 'modified'].includes(keyLower)) return false;
+                        // Wyklucz pola które są w konfiguracji (zarówno wymagane jak i optional)
+                        const isInConfig = activeTool.inputFields.some(f => f.key.toLowerCase() === keyLower);
+                        if (isInConfig) return false;
+                        // Wyklucz pola wyjściowe
+                        const isOutput = activeTool.outputFields.some(o => o.toLowerCase() === keyLower);
+                        if (isOutput) return false;
+                        return true;
+                      });
+
+                      const hasHiddenFields = hiddenConfigFields.length > 0 || hiddenAirtableFields.length > 0;
+                      if (!hasHiddenFields) return null;
+
+                      return (
+                        <div className="relative" ref={addFieldDropdownRef}>
+                          <button
+                            type="button"
+                            onClick={() => setShowAddFieldDropdown(!showAddFieldDropdown)}
+                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium py-2 px-3 rounded-lg hover:bg-blue-50 transition-colors"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Dodaj pole
+                            {isLoadingSchema && <RefreshCw className="w-3 h-3 animate-spin" />}
+                          </button>
+                          {showAddFieldDropdown && (
+                              <div
+                                className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-50 min-w-[250px] max-h-[300px] overflow-y-auto"
+                              >
+                                {/* Pola z konfiguracji (opcjonalne) */}
+                                {hiddenConfigFields.length > 0 && (
+                                  <>
+                                    <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                                      Pola zdefiniowane
+                                    </div>
+                                    {hiddenConfigFields.map(field => (
+                                      <button
+                                        key={field.key}
+                                        type="button"
+                                        onClick={() => {
+                                          const newFields = new Set([...visibleOptionalFields, field.key]);
+                                          setVisibleOptionalFields(newFields);
+                                          saveFieldsConfig(activeTool.id, newFields);
+                                          setShowAddFieldDropdown(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                      >
+                                        {field.label}
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
+                                {/* Pola z Airtable */}
+                                {hiddenAirtableFields.length > 0 && (
+                                  <>
+                                    <div className="px-4 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wide border-t border-slate-100 mt-1 pt-2">
+                                      Pola z Airtable
+                                    </div>
+                                    {hiddenAirtableFields.map(field => (
+                                      <button
+                                        key={field.id}
+                                        type="button"
+                                        onClick={() => {
+                                          const newFields = new Set([...visibleOptionalFields, field.name]);
+                                          setVisibleOptionalFields(newFields);
+                                          saveFieldsConfig(activeTool.id, newFields);
+                                          setShowAddFieldDropdown(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-between"
+                                      >
+                                        <span>{field.name}</span>
+                                        <span className="text-xs text-slate-400">{field.type}</span>
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
+                              </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                  </form>
                 </div>
-                <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3 rounded-b-xl">
-                    <button 
-                        type="button" 
-                        onClick={() => setShowForm(false)}
-                        className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 text-sm font-medium transition-all"
-                    >
-                        Anuluj
-                    </button>
-                    <button
-                      type="submit"
-                      form="automation-form"
-                      disabled={isSaving}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
-                    >
-                      {isSaving ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
-                      {editingRecordId ? 'Zapisz' : 'Uruchom Automat'}
-                    </button>
+
+                {/* Modal Footer */}
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-3 rounded-b-2xl flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowForm(false)}
+                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 text-sm font-medium transition-all"
+                  >
+                    Anuluj
+                  </button>
+                  <button
+                    type="submit"
+                    form="automation-form"
+                    disabled={isSaving}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium shadow-md disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
+                  >
+                    {isSaving ? <RefreshCw className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
+                    Dodaj do bazy
+                  </button>
                 </div>
               </div>
-            )}
-
-          </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

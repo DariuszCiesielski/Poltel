@@ -22,7 +22,9 @@ npm run build        # Build produkcyjny
 ├── App.tsx              # Główny komponent (dashboard + widok narzędzia)
 ├── constants.tsx        # Konfiguracja narzędzi (AUTOMATION_TOOLS) + STATUS_OPTIONS
 ├── types.ts             # Interfejsy TypeScript
-├── services/airtableService.ts  # Klient API Airtable (CRUD)
+├── services/airtableService.ts  # Klient API Airtable (CRUD + Meta API)
+├── components/auth/     # Komponenty autoryzacji (LoginForm, AuthGuard)
+├── contexts/AuthContext.tsx  # Context autoryzacji użytkownika
 ├── .n8n/                # Workflow n8n (Generator opisów, Import/Export Excel)
 └── index.html, vite.config.ts, vercel.json
 ```
@@ -51,6 +53,8 @@ Poltel Hub → Airtable API → n8n Automatyzacje → Airtable API → Poltel Hu
 
 **Case-insensitive field matching**: funkcje `findFieldKey`, `getFieldValue` w App.tsx
 
+**Airtable Meta API**: `fetchTableSchema()` w airtableService.ts pobiera schemat pól tabeli (typy, opcje select)
+
 **Statusy workflow** (STATUS_OPTIONS w constants.tsx):
 | Kolor | Statusy |
 |-------|---------|
@@ -70,12 +74,13 @@ Poltel Hub → Airtable API → n8n Automatyzacje → Airtable API → Poltel Hu
 ```typescript
 {
   id: 'unique-id',
-  label: 'Nazwa wyświetlana',
   tableName: 'Nazwa tabeli w Airtable',
   icon: <IconComponent className="w-5 h-5" />,
   description: 'Opis funkcjonalności',
+  newRecordLabel: 'Nowy rekord',  // etykieta w nagłówku modala
   inputFields: [
-    { key: 'NazwaKolumny', label: 'Etykieta', type: 'text', required: true }
+    { key: 'NazwaKolumny', label: 'Etykieta', type: 'text', required: true },
+    { key: 'OpcjonalnePole', label: 'Opcjonalne', type: 'textarea', optional: true }
   ],
   outputFields: ['Kolumna Wynikowa'],
   inputModes: [  // opcjonalne
@@ -90,7 +95,8 @@ Poltel Hub → Airtable API → n8n Automatyzacje → Airtable API → Poltel Hu
 - `text`, `textarea`, `url` - pola tekstowe
 - `select` - lista z `options: string[]`
 - `file` - upload z `accept: '.xlsx,.xls'`
-- Wspólne: `key`, `label`, `required`, `showForMode`
+- Wspólne: `key`, `label`, `required`, `showForMode`, `optional`, `placeholder`
+- `optional: true` - pole ukryte domyślnie, dostępne przez przycisk "Dodaj pole"
 
 ### Załączniki Airtable
 ```typescript
@@ -131,7 +137,13 @@ Pliki w `.n8n/Generator opisów produktów/`:
 - Drag-fill (jak Excel - przeciągnij róg komórki)
 - Upload plików przez drag & drop
 
-**Modal:** podgląd/edycja rekordu (klik na wiersz)
+**Modal edycji:** podgląd/edycja rekordu (klik na wiersz), resize przez uchwyty
+
+**Modal tworzenia:**
+- Dynamiczne pola z Airtable Meta API (pobiera schemat tabeli)
+- Pola opcjonalne dostępne przez "Dodaj pole"
+- Drag & drop do zmiany kolejności pól (zapisywane w localStorage)
+- Resize przez uchwyty na krawędziach
 
 **Eksport XLS:** przycisk gdy są rekordy ze statusem "Eksportuj dane do pliku"
 

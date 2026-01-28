@@ -1,4 +1,4 @@
-import { AirtableRecord, AirtableRecordFields } from '../types';
+import { AirtableRecord, AirtableRecordFields, AirtableTableSchema } from '../types';
 import { STATUS_FIELD_NAME, STATUS_TODO } from '../constants';
 
 const API_BASE = 'https://api.airtable.com/v0';
@@ -92,7 +92,7 @@ export class AirtableService {
             headers: this.headers,
             body: JSON.stringify({ fields })
         });
-        
+
         if (!response.ok) {
             const err = await response.json();
             const errorMessage = err.error?.message || err.error || 'Failed to update record';
@@ -101,6 +101,27 @@ export class AirtableService {
     } catch(error) {
         console.error(error);
         throw error;
+    }
+  }
+
+  async getTableSchema(tableName: string): Promise<AirtableTableSchema | null> {
+    try {
+      const response = await fetch(`https://api.airtable.com/v0/meta/bases/${this.baseId}/tables`, {
+        headers: this.headers
+      });
+
+      if (!response.ok) {
+        console.error('Failed to fetch table schema:', response.statusText);
+        return null;
+      }
+
+      const data = await response.json();
+      const table = data.tables?.find((t: AirtableTableSchema) => t.name === tableName);
+
+      return table || null;
+    } catch (error) {
+      console.error('Error fetching table schema:', error);
+      return null;
     }
   }
 }

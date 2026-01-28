@@ -16,21 +16,22 @@ import {
 export const AUTOMATION_TOOLS: AutomationConfig[] = [
   {
     id: 'internet-articles',
-    label: 'Artykuły z Internetu',
     tableName: 'Artykuły z Internetu',
     icon: <Globe className="w-5 h-5" />,
     description: 'Generuje artykuły na podstawie podanych linków i tematów znalezionych w sieci.',
+    newRecordLabel: 'Nowy artykuł',
     inputFields: [
       { key: 'Text', label: 'Temat / Tytuł', type: 'text', required: true, placeholder: 'Wpisz temat artykułu...' },
+      { key: 'Dodatkowe instrukcje', label: 'Instrukcje dla AI', type: 'textarea', placeholder: 'Opcjonalne wytyczne dla AI (np. styl pisania, długość, słowa kluczowe)...', optional: true },
     ],
     outputFields: ['Article OpenAI', 'Article Anthropic', 'Excerpt', 'LinkedIn Post', 'Facebook Post']
   },
   {
     id: 'product-desc',
-    label: 'Generator Opisów Produktów',
     tableName: 'Generator opisów produktowych',
     icon: <ShoppingBag className="w-5 h-5" />,
     description: 'Generuje zoptymalizowane pod SEO opisy produktów. Możesz podać pojedynczy link lub zaimportować wiele produktów z pliku Excel.',
+    newRecordLabel: 'Nowy opis produktu',
     inputModes: [
       { id: 'url', label: 'Pojedynczy URL', description: 'Podaj link do produktu', initialStatus: 'Generuj opis' },
       { id: 'excel', label: 'Import z Excel', description: 'Wgraj plik Excel z linkami', initialStatus: 'Przetwórz plik Excel' }
@@ -38,46 +39,47 @@ export const AUTOMATION_TOOLS: AutomationConfig[] = [
     inputFields: [
       { key: 'URL', label: 'Link do produktu', type: 'url', placeholder: 'https://...', showForMode: 'url', required: true },
       { key: 'Plik Excel', label: 'Plik Excel z linkami', type: 'file', accept: '.xlsx,.xls', showForMode: 'excel', required: true },
-      { key: 'Opis', label: 'Dodatkowe informacje o produkcie', type: 'textarea', placeholder: 'Opcjonalne informacje o produkcie niedostępne w internecie (np. specyfikacja techniczna, cechy szczególne)...' },
-      { key: 'Dodatkowe instrukcje dla automatyzacji', label: 'Instrukcje dla AI', type: 'textarea', placeholder: 'Opcjonalne wytyczne dla AI (np. pomiń marki, skup się na funkcjach)...' }
+      { key: 'Opis', label: 'Dodatkowe informacje o produkcie', type: 'textarea', placeholder: 'Opcjonalne informacje o produkcie niedostępne w internecie (np. specyfikacja techniczna, cechy szczególne)...', optional: true },
+      { key: 'Dodatkowe instrukcje dla automatyzacji', label: 'Instrukcje dla AI', type: 'textarea', placeholder: 'Opcjonalne wytyczne dla AI (np. pomiń marki, skup się na funkcjach)...', optional: true }
     ],
     outputFields: ['Opis rozszerzony'],
     supportsExport: true
   },
   {
     id: 'competitor-search',
-    label: 'Wyszukiwarka Odpowiedników',
     tableName: 'Wyszukiwarka odpowiedników produktów',
     icon: <Search className="w-5 h-5" />,
     description: 'Wyszukuje odpowiedniki produktów i analizuje konkurencję.',
+    newRecordLabel: 'Nowe wyszukiwanie',
     inputFields: [
-      { key: 'Opis produktu', label: 'Opis szukanego produktu', type: 'textarea', required: true }
+      { key: 'Opis produktu', label: 'Opis szukanego produktu', type: 'textarea', required: true },
+      { key: 'Dodatkowe kryteria', label: 'Dodatkowe kryteria wyszukiwania', type: 'textarea', placeholder: 'Opcjonalne kryteria (np. przedział cenowy, preferowani producenci, wykluczenia)...', optional: true }
     ],
     outputFields: ['Opis odpowiednik 1', 'URL odpowiednik 1', 'Opis odpowiednik 2', 'URL odpowiednik 2', 'Opis odpowiednik 3', 'URL odpowiednik 3']
   },
   {
     id: 'expert-article',
-    label: 'Artykuły Eksperckie SEO',
     tableName: 'Generator artykułów eksperckich SEO',
     icon: <PenTool className="w-5 h-5" />,
     description: 'Tworzy rozbudowane, profesjonalne artykuły blogowe pod pozycjonowanie.',
+    newRecordLabel: 'Nowy artykuł ekspercki',
     inputFields: [
       { key: 'Słowo Kluczowe', label: 'Słowo kluczowe', type: 'text', required: true, placeholder: 'np. okablowanie strukturalne' },
-      { key: 'Język', label: 'Język', type: 'select', options: ['Polish', 'English'] },
-      { key: 'Lokalizacja', label: 'Lokalizacja', type: 'text', placeholder: 'Poland' }
+      { key: 'Język', label: 'Język', type: 'select', options: ['Polish', 'English'], optional: true },
+      { key: 'Lokalizacja', label: 'Lokalizacja', type: 'text', placeholder: 'Poland', optional: true }
     ],
     outputFields: ['Article', 'Title', 'Intro', 'Conclusion', 'Faq', 'Excerpt']
   },
   {
     id: 'general-article',
-    label: 'Artykuły Ogólne',
     tableName: 'Generator artykułów ogólnych',
     icon: <Newspaper className="w-5 h-5" />,
     description: 'Generuje artykuły ogólne i treści na stronę z wsparciem POLTEL.',
+    newRecordLabel: 'Nowy artykuł',
     inputFields: [
       { key: 'Tytuł artykułu', label: 'Tytuł artykułu', type: 'text', required: true },
-      { key: 'Co ma zawierać artykuł', label: 'Co ma zawierać artykuł', type: 'textarea' },
-      { key: 'Ton w jakim pisać', label: 'Ton pisania', type: 'text', placeholder: 'Ekspercki, techniczny...' }
+      { key: 'Co ma zawierać artykuł', label: 'Co ma zawierać artykuł', type: 'textarea', optional: true },
+      { key: 'Ton w jakim pisać', label: 'Ton pisania', type: 'text', placeholder: 'Ekspercki, techniczny...', optional: true }
     ],
     outputFields: ['Article OpenAI', 'Excerpt', 'LinkedIn Post', 'Facebook Post']
   }
