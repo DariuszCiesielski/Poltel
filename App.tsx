@@ -256,8 +256,11 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<AirtableRecord | null>(null);
-  const [modalEditMode, setModalEditMode] = useState(false);
   const [modalFormData, setModalFormData] = useState<AirtableRecordFields>({});
+  const [originalModalData, setOriginalModalData] = useState<AirtableRecordFields>({});
+  const [modalFileDragOver, setModalFileDragOver] = useState<string | null>(null); // Klucz pola z drag over
+  const [modalFileNames, setModalFileNames] = useState<{ [key: string]: string }>({}); // Oryginalne nazwy plików
+  const [modalStatusDropdownOpen, setModalStatusDropdownOpen] = useState(false); // Dropdown statusu w modalu
 
   // Form State
   const [formData, setFormData] = useState<AirtableRecordFields>({});
@@ -288,12 +291,19 @@ export default function App() {
   const [dragFillTarget, setDragFillTarget] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const [isDraggingFill, setIsDraggingFill] = useState(false);
 
+  // --- Modal Resize State ---
+  const [modalWidth, setModalWidth] = useState(896); // Domyślna szerokość (max-w-4xl = 896px)
+  const MIN_MODAL_WIDTH = 400;
+  const MAX_MODAL_WIDTH = 1600;
+
   // Refs do przechowywania aktualnych wartości dla event handlers (unika problemu z closure)
   const dragFillSourceRef = useRef<{ recordId: string; columnKey: string; value: string } | null>(null);
   const dragFillTargetRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
 
   const resizingColumn = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizingRow = useRef<{ startY: number; startHeight: number } | null>(null);
+  const resizingModal = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
+  const lastModalRecordId = useRef<string | null>(null); // Śledzenie ID rekordu w modalu
 
   // Domyślne szerokości kolumn
   const getColumnWidth = (key: string, type?: string) => {
@@ -359,6 +369,35 @@ export default function App() {
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
     document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  // Obsługa zmiany szerokości modalu
+  const handleModalResizeStart = (e: React.MouseEvent, side: 'left' | 'right') => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingModal.current = { side, startX: e.clientX, startWidth: modalWidth };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizingModal.current) return;
+      const diff = moveEvent.clientX - resizingModal.current.startX;
+      // Dla lewej strony - odejmujemy różnicę, dla prawej - dodajemy
+      const widthChange = resizingModal.current.side === 'left' ? -diff * 2 : diff * 2;
+      const newWidth = Math.max(MIN_MODAL_WIDTH, Math.min(MAX_MODAL_WIDTH, resizingModal.current.startWidth + widthChange));
+      setModalWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      resizingModal.current = null;
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'ew-resize';
     document.body.style.userSelect = 'none';
   };
 
@@ -478,10 +517,76 @@ export default function App() {
   useEffect(() => {
     if (viewMode === 'tool' && activeToolId) {
       loadRecords();
-      const interval = setInterval(loadRecords, 10000); 
+      const interval = setInterval(loadRecords, 10000);
       return () => clearInterval(interval);
     }
   }, [loadRecords, viewMode, activeToolId]);
+
+  // Inicjalizacja danych modalu gdy otworzymy NOWY rekord (nie przy każdym renderze)
+  useEffect(() => {
+    if (selectedRecord && activeTool) {
+      // Tylko inicjalizuj gdy otwieramy inny rekord niż poprzednio
+      if (lastModalRecordId.current === selectedRecord.id) {
+        return; // Ten sam rekord - nie nadpisuj formularza
+      }
+      lastModalRecordId.current = selectedRecord.id;
+
+      const newFormData: AirtableRecordFields = {};
+      const newFileNames: { [key: string]: string } = {};
+
+      // Pobierz wszystkie pola wejściowe
+      activeTool.inputFields.forEach(field => {
+        const val = getFieldValue(selectedRecord, field.key);
+        if (val === undefined || val === null) {
+          newFormData[field.key] = '';
+        } else if (field.type === 'file') {
+          // Dla pól typu file - wyciągnij URL i nazwę pliku z tablicy Airtable
+          if (Array.isArray(val) && val.length > 0 && val[0]?.url) {
+            newFormData[field.key] = val[0].url;
+            newFileNames[field.key] = val[0].filename || 'plik.xlsx';
+          } else if (typeof val === 'string') {
+            newFormData[field.key] = val;
+          } else {
+            newFormData[field.key] = '';
+          }
+        } else {
+          newFormData[field.key] = String(val);
+        }
+      });
+
+      // Pobierz pola wynikowe
+      activeTool.outputFields.forEach(fieldKey => {
+        const val = getFieldValue(selectedRecord, fieldKey);
+        newFormData[fieldKey] = val !== undefined && val !== null ? String(val) : '';
+      });
+
+      // Pobierz Status
+      const statusVal = getFieldValue(selectedRecord, STATUS_FIELD_NAME);
+      newFormData[STATUS_FIELD_NAME] = statusVal !== undefined && statusVal !== null ? String(statusVal) : '';
+
+      setModalFormData(newFormData);
+      setOriginalModalData(newFormData);
+      setModalFileNames(newFileNames);
+    } else {
+      // Reset gdy zamykamy modal
+      lastModalRecordId.current = null;
+      setModalFormData({});
+      setOriginalModalData({});
+      setModalFileNames({});
+    }
+  }, [selectedRecord, activeTool]);
+
+  // Sprawdź czy są zmiany w modalu
+  const hasModalChanges = () => {
+    const keys = Object.keys(modalFormData);
+    if (keys.length === 0) return false;
+    for (const key of keys) {
+      if (String(modalFormData[key] || '') !== String(originalModalData[key] || '')) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   const handleSaveSettings = () => {
     localStorage.setItem('AT_API_KEY', apiKey);
@@ -534,35 +639,24 @@ export default function App() {
     setShowForm(true);
   };
 
-  // Inicjalizacja edycji w modalu
-  const initModalEdit = () => {
+  // Resetowanie zmian w modalu (przywraca oryginalne dane z Airtable)
+  const resetModalChanges = () => {
     if (!selectedRecord || !activeTool) return;
-    const newFormData: AirtableRecordFields = {};
 
-    // Pobierz wszystkie pola wejściowe
+    // Przywróć oryginalne dane formularza
+    setModalFormData({ ...originalModalData });
+
+    // Przywróć oryginalne nazwy plików z rekordu
+    const originalFileNames: { [key: string]: string } = {};
     activeTool.inputFields.forEach(field => {
-      const val = getFieldValue(selectedRecord, field.key);
-      newFormData[field.key] = val !== undefined ? val : '';
+      if (field.type === 'file') {
+        const val = getFieldValue(selectedRecord, field.key);
+        if (Array.isArray(val) && val.length > 0 && val[0]?.filename) {
+          originalFileNames[field.key] = val[0].filename;
+        }
+      }
     });
-
-    // Pobierz pola wynikowe (też edytowalne)
-    activeTool.outputFields.forEach(fieldKey => {
-      const val = getFieldValue(selectedRecord, fieldKey);
-      newFormData[fieldKey] = val !== undefined ? val : '';
-    });
-
-    // Pobierz Status
-    const statusVal = getFieldValue(selectedRecord, STATUS_FIELD_NAME);
-    newFormData[STATUS_FIELD_NAME] = statusVal !== undefined ? statusVal : '';
-
-    setModalFormData(newFormData);
-    setModalEditMode(true);
-  };
-
-  // Anulowanie edycji w modalu
-  const cancelModalEdit = () => {
-    setModalEditMode(false);
-    setModalFormData({});
+    setModalFileNames(originalFileNames);
   };
 
   // Zapisanie zmian z modalu
@@ -577,33 +671,38 @@ export default function App() {
       activeTool.inputFields.forEach(field => {
         const configKey = field.key;
         const actualKey = findFieldKey(selectedRecord, configKey) || configKey;
+        const value = modalFormData[configKey];
 
-        if (field.type === 'file' && modalFormData[configKey]) {
-          finalFields[actualKey] = [{ url: String(modalFormData[configKey]) }];
-        } else if (modalFormData[configKey] !== undefined && modalFormData[configKey] !== '') {
-          finalFields[actualKey] = modalFormData[configKey];
+        if (field.type === 'file' && value) {
+          // Zapisz plik z oryginalną nazwą
+          const filename = modalFileNames[configKey] || 'plik.xlsx';
+          finalFields[actualKey] = [{ url: String(value), filename }];
+        } else if (value !== undefined && value !== '') {
+          finalFields[actualKey] = value;
         }
       });
 
       // Mapuj pola wynikowe
       activeTool.outputFields.forEach(fieldKey => {
         const actualKey = findFieldKey(selectedRecord, fieldKey) || fieldKey;
-        if (modalFormData[fieldKey] !== undefined) {
-          finalFields[actualKey] = modalFormData[fieldKey];
+        const value = modalFormData[fieldKey];
+        if (value !== undefined && value !== '') {
+          finalFields[actualKey] = value;
         }
       });
 
-      // Mapuj Status
-      if (modalFormData[STATUS_FIELD_NAME]) {
+      // Mapuj Status - zawsze zapisuj jeśli jest ustawiony
+      const statusValue = modalFormData[STATUS_FIELD_NAME];
+      if (statusValue) {
         const actualStatusKey = findFieldKey(selectedRecord, STATUS_FIELD_NAME) || STATUS_FIELD_NAME;
-        finalFields[actualStatusKey] = modalFormData[STATUS_FIELD_NAME];
+        finalFields[actualStatusKey] = statusValue;
       }
 
       await airtable.updateRecord(activeTool.tableName, selectedRecord.id, finalFields);
 
-      setModalEditMode(false);
-      setModalFormData({});
-      await loadRecords();
+      // Po zapisie zaktualizuj oryginalne dane (żeby przycisk Zapisz się dezaktywował)
+      setOriginalModalData({ ...modalFormData });
+      loadRecords();
     } catch (err) {
       console.error('Błąd zapisu:', err);
       alert('Wystąpił błąd podczas zapisu. Sprawdź konsolę.');
@@ -615,6 +714,34 @@ export default function App() {
   // Zmiana wartości pola w modalu
   const handleModalFieldChange = (key: string, value: string) => {
     setModalFormData(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Obsługa uploadu pliku w modalu (drag & drop) - tylko upload, zapis do Airtable po kliknięciu "Zapisz"
+  const handleModalFileUpload = async (file: File, fieldKey: string) => {
+    // Sprawdź typ pliku
+    const allowedExtensions = ['.xlsx', '.xls'];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!allowedExtensions.includes(fileExtension)) {
+      alert('Dozwolone są tylko pliki Excel (.xlsx, .xls)');
+      return;
+    }
+
+    setModalFileDragOver(null);
+    setIsSaving(true);
+
+    try {
+      // Upload pliku na Cloudinary (bez zapisu do Airtable)
+      const fileUrl = await uploadFileToHost(file);
+
+      // Zapisz URL i oryginalną nazwę pliku w formularzu
+      setModalFormData(prev => ({ ...prev, [fieldKey]: fileUrl }));
+      setModalFileNames(prev => ({ ...prev, [fieldKey]: file.name }));
+    } catch (err) {
+      console.error('Błąd uploadu pliku:', err);
+      alert(`Wystąpił błąd podczas uploadu pliku: ${err instanceof Error ? err.message : 'Nieznany błąd'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // --- Inline Cell Editing ---
@@ -1974,19 +2101,33 @@ export default function App() {
 
           {/* Record Detail/Edit Modal */}
           {selectedRecord && !showForm && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { if (!modalEditMode) { setSelectedRecord(null); setModalEditMode(false); } }}>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { if (!hasModalChanges()) { setSelectedRecord(null); } }}>
               <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+                className="bg-white rounded-2xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 relative"
+                style={{ width: `${modalWidth}px`, maxWidth: '95vw' }}
                 onClick={e => e.stopPropagation()}
               >
+                {/* Lewy uchwyt resize */}
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/20 transition-colors z-10 group"
+                  onMouseDown={e => handleModalResizeStart(e, 'left')}
+                >
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-16 bg-slate-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                {/* Prawy uchwyt resize */}
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/20 transition-colors z-10 group"
+                  onMouseDown={e => handleModalResizeStart(e, 'right')}
+                >
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-16 bg-slate-300 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
                 {/* Modal Header */}
                 <div className="flex justify-between items-start px-6 py-4 border-b border-slate-200 bg-slate-50">
                   <div className="flex-1 min-w-0 pr-4">
                     <h2 className="text-xl font-bold text-slate-900 truncate mb-1">
-                      {modalEditMode ? 'Edycja rekordu' : getRecordTitle(selectedRecord)}
+                      {getRecordTitle(selectedRecord)}
                     </h2>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <StatusBadge status={String(getFieldValue(selectedRecord, STATUS_FIELD_NAME) || 'Oczekuje')} />
                       <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         Utworzono: {new Date(selectedRecord.createdTime).toLocaleString('pl-PL')}
@@ -2004,34 +2145,28 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {!modalEditMode ? (
+                    {hasModalChanges() && (
                       <button
-                        onClick={initModalEdit}
-                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                        onClick={resetModalChanges}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                       >
-                        <Edit2 className="w-4 h-4" />
-                        Edytuj
+                        Cofnij zmiany
                       </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={cancelModalEdit}
-                          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                        >
-                          Anuluj
-                        </button>
-                        <button
-                          onClick={handleModalSave}
-                          disabled={isSaving}
-                          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
-                        >
-                          {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          Zapisz
-                        </button>
-                      </>
                     )}
                     <button
-                      onClick={() => { setSelectedRecord(null); setModalEditMode(false); setModalFormData({}); }}
+                      onClick={handleModalSave}
+                      disabled={isSaving || !hasModalChanges()}
+                      className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                        hasModalChanges()
+                          ? 'text-white bg-blue-600 hover:bg-blue-700'
+                          : 'text-slate-400 bg-slate-100 cursor-not-allowed'
+                      } disabled:opacity-50`}
+                    >
+                      {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Zapisz
+                    </button>
+                    <button
+                      onClick={() => { setSelectedRecord(null); }}
                       className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition-colors"
                     >
                       ✕
@@ -2041,25 +2176,73 @@ export default function App() {
 
                 {/* Modal Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                  {/* Status (edytowalny) */}
-                  {modalEditMode && (
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4" />
-                        Status
-                      </h3>
-                      <select
-                        value={String(modalFormData[STATUS_FIELD_NAME] || '')}
-                        onChange={e => handleModalFieldChange(STATUS_FIELD_NAME, e.target.value)}
-                        className="w-full md:w-64 rounded-lg border-slate-300 border bg-white p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        <option value="">Wybierz status...</option>
-                        {STATUS_OPTIONS.map(opt => (
-                          <option key={opt.value} value={opt.value}>{opt.value}</option>
-                        ))}
-                      </select>
+                  {/* Status (zawsze edytowalny) */}
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      Status
+                    </h3>
+                    <div className="relative w-full md:w-64">
+                      {(() => {
+                        const currentStatus = String(modalFormData[STATUS_FIELD_NAME] || '');
+                        const statusColors = getStatusColors(currentStatus);
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setModalStatusDropdownOpen(!modalStatusDropdownOpen)}
+                              className={`w-full text-sm font-semibold rounded-lg border py-2.5 px-3 pr-8 cursor-pointer transition-all flex items-center gap-2 ${
+                                currentStatus
+                                  ? `${statusColors.bgColor} ${statusColors.textColor} ${statusColors.borderColor}`
+                                  : 'bg-white text-slate-500 border-slate-300'
+                              } hover:opacity-90`}
+                            >
+                              {currentStatus && (
+                                <span className={`w-3 h-3 rounded-full ${statusColors.bgColor} border ${statusColors.borderColor}`}></span>
+                              )}
+                              <span className="truncate">{currentStatus || 'Wybierz status...'}</span>
+                              <svg
+                                className={`w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 transition-transform ${modalStatusDropdownOpen ? 'rotate-180' : ''}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </button>
+
+                            {modalStatusDropdownOpen && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setModalStatusDropdownOpen(false)}
+                                />
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-50 max-h-[300px] overflow-y-auto">
+                                  {STATUS_OPTIONS.map(opt => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => {
+                                        handleModalFieldChange(STATUS_FIELD_NAME, opt.value);
+                                        setModalStatusDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2"
+                                    >
+                                      <span className={`inline-block w-3 h-3 rounded-full ${opt.bgColor} border ${opt.borderColor}`}></span>
+                                      <span className={opt.textColor}>{opt.value}</span>
+                                      {currentStatus === opt.value && (
+                                        <Check className="w-4 h-4 ml-auto text-blue-600" />
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
-                  )}
+                  </div>
 
                   {/* Dane wejściowe */}
                   <div>
@@ -2069,46 +2252,108 @@ export default function App() {
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {activeTool?.inputFields.map(field => {
-                        const val = modalEditMode ? modalFormData[field.key] : getFieldValue(selectedRecord, field.key);
-                        const isUrl = field.type === 'url' || (typeof val === 'string' && String(val)?.startsWith('http'));
+                        const val = modalFormData[field.key] || '';
 
+                        // Pole typu file - z drag & drop
+                        if (field.type === 'file') {
+                          return (
+                            <div key={field.key}>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
+                                {field.label}
+                              </label>
+                              <div
+                                className={`relative rounded-lg border-2 border-dashed p-4 transition-colors ${
+                                  modalFileDragOver === field.key
+                                    ? 'border-blue-500 bg-blue-50'
+                                    : 'border-slate-300 bg-slate-50 hover:border-slate-400'
+                                }`}
+                                onDragOver={e => { e.preventDefault(); setModalFileDragOver(field.key); }}
+                                onDragLeave={() => setModalFileDragOver(null)}
+                                onDrop={e => {
+                                  e.preventDefault();
+                                  const file = e.dataTransfer.files[0];
+                                  if (file) handleModalFileUpload(file, field.key);
+                                }}
+                              >
+                                {val ? (
+                                  <div className="flex items-center gap-2">
+                                    <a href={String(val)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all flex items-center gap-1 text-sm flex-1">
+                                      {modalFileNames[field.key] || 'plik.xlsx'} <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                                    </a>
+                                    <button
+                                      onClick={() => {
+                                        handleModalFieldChange(field.key, '');
+                                        setModalFileNames(prev => {
+                                          const updated = { ...prev };
+                                          delete updated[field.key];
+                                          return updated;
+                                        });
+                                      }}
+                                      className="text-slate-400 hover:text-red-500 p-1"
+                                      title="Usuń plik"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="text-center text-slate-400 text-sm">
+                                    <Upload className="w-6 h-6 mx-auto mb-1" />
+                                    <p>Przeciągnij plik Excel lub <label className="text-blue-600 hover:underline cursor-pointer">
+                                      wybierz
+                                      <input
+                                        type="file"
+                                        accept=".xlsx,.xls"
+                                        className="hidden"
+                                        onChange={e => {
+                                          const file = e.target.files?.[0];
+                                          if (file) handleModalFileUpload(file, field.key);
+                                        }}
+                                      />
+                                    </label></p>
+                                  </div>
+                                )}
+                                {isSaving && modalFileDragOver === field.key && (
+                                  <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-lg">
+                                    <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // Pole textarea
+                        if (field.type === 'textarea') {
+                          return (
+                            <div key={field.key} className="md:col-span-2">
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
+                                {field.label}
+                              </label>
+                              <textarea
+                                value={String(val)}
+                                onChange={e => handleModalFieldChange(field.key, e.target.value)}
+                                className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[100px]"
+                                placeholder={field.placeholder}
+                              />
+                            </div>
+                          );
+                        }
+
+                        // Pole url lub text
+                        // URL zajmuje pełną szerokość dla lepszej czytelności
+                        const isUrlField = field.type === 'url';
                         return (
-                          <div key={field.key} className={`${field.type === 'textarea' ? 'md:col-span-2' : ''}`}>
+                          <div key={field.key} className={isUrlField ? 'md:col-span-2' : ''}>
                             <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">
                               {field.label}
                             </label>
-                            {modalEditMode ? (
-                              field.type === 'textarea' ? (
-                                <textarea
-                                  value={String(val || '')}
-                                  onChange={e => handleModalFieldChange(field.key, e.target.value)}
-                                  className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[100px]"
-                                  placeholder={field.placeholder}
-                                />
-                              ) : (
-                                <input
-                                  type={field.type === 'url' ? 'url' : 'text'}
-                                  value={String(val || '')}
-                                  onChange={e => handleModalFieldChange(field.key, e.target.value)}
-                                  className="w-full rounded-lg border-slate-300 border bg-white p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  placeholder={field.placeholder}
-                                />
-                              )
-                            ) : (
-                              <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 text-sm text-slate-700 min-h-[40px]">
-                                {val ? (
-                                  isUrl ? (
-                                    <a href={String(val)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all flex items-center gap-1">
-                                      {String(val)} <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                                    </a>
-                                  ) : (
-                                    <div className="whitespace-pre-wrap break-words">{String(val)}</div>
-                                  )
-                                ) : (
-                                  <span className="text-slate-300 italic">Brak danych</span>
-                                )}
-                              </div>
-                            )}
+                            <input
+                              type={isUrlField ? 'url' : 'text'}
+                              value={String(val)}
+                              onChange={e => handleModalFieldChange(field.key, e.target.value)}
+                              className="w-full rounded-lg border-slate-300 border bg-white p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 break-all"
+                              placeholder={field.placeholder}
+                            />
                           </div>
                         );
                       })}
@@ -2123,8 +2368,7 @@ export default function App() {
                     </h3>
                     <div className="space-y-4">
                       {activeTool?.outputFields.map(fieldKey => {
-                        const content = modalEditMode ? modalFormData[fieldKey] : getFieldValue(selectedRecord, fieldKey);
-                        const hasContent = content && String(content).trim().length > 0;
+                        const content = modalFormData[fieldKey] || '';
 
                         return (
                           <div key={fieldKey} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -2134,23 +2378,15 @@ export default function App() {
                                 {fieldKey}
                               </h4>
                             </div>
-                            {modalEditMode ? (
-                              <div className="p-4">
-                                <textarea
-                                  value={String(content || '')}
-                                  onChange={e => handleModalFieldChange(fieldKey, e.target.value)}
-                                  className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[200px] font-mono"
-                                  placeholder="Wpisz lub wklej zawartość..."
-                                />
-                              </div>
-                            ) : hasContent ? (
-                              <HtmlOutputViewer content={String(content)} fieldName={fieldKey} />
-                            ) : (
-                              <div className="p-6 flex items-center justify-center text-slate-400 italic text-sm">
-                                <Clock className="w-4 h-4 mr-2" />
-                                Oczekiwanie na wynik automatyzacji...
-                              </div>
-                            )}
+                            <div className="p-4">
+                              <textarea
+                                value={String(content)}
+                                onChange={e => handleModalFieldChange(fieldKey, e.target.value)}
+                                className="w-full rounded-lg border-slate-300 border bg-white p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[200px] font-mono resize-y"
+                                style={{ maxHeight: '70vh' }}
+                                placeholder="Wpisz lub wklej zawartość... (lub poczekaj na wynik automatyzacji)"
+                              />
+                            </div>
                           </div>
                         );
                       })}
@@ -2158,7 +2394,7 @@ export default function App() {
                   </div>
 
                   {/* Uwagi systemowe (tylko odczyt) */}
-                  {!modalEditMode && (() => {
+                  {(() => {
                     const uwagi = getFieldValue(selectedRecord, 'Uwagi do działania automatyzacji (komentarz)');
                     if (!uwagi) return null;
                     return (
@@ -2175,7 +2411,7 @@ export default function App() {
                   })()}
 
                   {/* Pozostałe dane (tylko odczyt) */}
-                  {!modalEditMode && getRemainingFields().length > 0 && (
+                  {getRemainingFields().length > 0 && (
                     <div>
                       <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                         <List className="w-4 h-4" />
