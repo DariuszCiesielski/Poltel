@@ -20,6 +20,7 @@ npm run preview      # Podgląd buildu produkcyjnego
 - **Tailwind CSS** (CDN) ze stylami inline
 - **Lucide React** - ikony
 - **Airtable API** - backend danych
+- **xlsx (SheetJS)** - generowanie plików Excel
 - Deploy na **Vercel** (SPA z rewrite do index.html)
 
 ### Struktura plików (flat, bez src/)
@@ -505,11 +506,42 @@ Webhook → Search (Status="Eksportuj dane do pliku") → Create Spreadsheet →
 | Klik | Dropdown Status | Otwórz kolorowy dropdown statusów |
 | Przeciągnij plik | Pole plikowe | Upload pliku na Cloudinary |
 | Klik | Pole plikowe (puste) | Otwórz dialog wyboru pliku |
+| Przeciągnij | Niebieski kwadracik w rogu komórki | Wypełnij wartością sąsiednie komórki (drag-fill) |
+
+### Przeciąganie wartości komórek (drag-fill)
+
+Funkcja podobna do Excela - przeciąganie wartości z jednej komórki do wielu:
+
+1. **Najedź na komórkę** - pojawi się niebieski kwadracik w prawym dolnym rogu
+2. **Przeciągnij kwadracik** w górę lub w dół - komórki docelowe podświetlą się na niebiesko
+3. **Puść przycisk myszy** - wartość źródłowa zostanie skopiowana do wszystkich zaznaczonych komórek
+
+**Obsługiwane kolumny:**
+- Status (np. zmiana wielu rekordów na "Eksportuj dane do pliku")
+- Pola wejściowe (tekstowe, URL, textarea)
+- Pola wynikowe
+
+**Stan w kodzie:**
+- `selectedCell` - zaznaczona komórka
+- `dragFillSource` / `dragFillSourceRef` - źródło przeciągania
+- `dragFillTarget` / `dragFillTargetRef` - zakres docelowy
+- `isDraggingFill` - czy trwa przeciąganie
+
+### Eksport do pliku XLS
+
+Przycisk "Eksportuj plik .xls" pojawia się gdy są rekordy ze statusem "Eksportuj dane do pliku".
+
+**Działanie:**
+1. Filtruje rekordy ze statusem "Eksportuj dane do pliku"
+2. Generuje plik XLS z kolumnami: "Link do produktu" i "Opis rozszerzony"
+3. Automatycznie pobiera plik na dysk z nazwą `eksport_RRRR-MM-DD.xls`
+
+**Biblioteka:** `xlsx` (SheetJS) - generowanie plików Excel w przeglądarce.
 
 ### Pasek narzędzi tabeli
 
 ```
-[Wysokość: ═══○═══ 80px] | [Kolumny (2)] | ⇄ Przeciągnij kolumny | ↔ Zmień szerokość | ✎ Kliknij 2x aby edytować
+[Wysokość: ═══○═══ 80px] | [Kolumny (2)] | ⇄ Przeciągnij kolumny | ↔ Zmień szerokość | ✎ Kliknij, aby edytować rekord | ▪ Przeciągnij róg komórki
 ```
 
 - **Suwak wysokości** - reguluje wysokość wszystkich wierszy (40-200px)

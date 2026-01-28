@@ -6,11 +6,20 @@ Dashboard do zarządzania automatyzacjami contentowymi opartymi na Airtable. Zas
 
 ## Funkcjonalności
 
+### Narzędzia automatyzacji
 - **Artykuły z Internetu** - generowanie artykułów na podstawie linków źródłowych
 - **Generator Opisów Produktów** - opisy zoptymalizowane pod SEO
 - **Wyszukiwarka Odpowiedników** - analiza konkurencji i alternatywnych produktów
 - **Artykuły Eksperckie SEO** - rozbudowane artykuły blogowe
 - **Artykuły Ogólne** - proste treści na stronę
+
+### Interakcje w tabeli
+- **Edycja inline** - dwuklik na komórkę otwiera edytor
+- **Kolorowy dropdown statusów** - szybka zmiana statusu rekordu
+- **Przeciąganie wartości (drag-fill)** - jak w Excelu, przeciągnij róg komórki aby skopiować wartość
+- **Eksport do XLS** - pobierz wybrane rekordy jako plik Excel
+- **Drag & drop plików** - przeciągnij plik Excel na pole w tabeli
+- **Zarządzanie kolumnami** - ukrywanie, zmiana kolejności i szerokości
 
 ## Stack technologiczny
 
@@ -18,6 +27,7 @@ Dashboard do zarządzania automatyzacjami contentowymi opartymi na Airtable. Zas
 - **Vite** - bundler i dev server
 - **Tailwind CSS** - styling
 - **Lucide React** - ikony
+- **xlsx (SheetJS)** - generowanie plików Excel
 - **Airtable API** - backend danych
 
 ## Uruchomienie lokalne

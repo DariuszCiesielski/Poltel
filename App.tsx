@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { AirtableService } from './services/airtableService';
 import { AUTOMATION_TOOLS, STATUS_FIELD_NAME, PRODUCT_DESC_STATUSES } from './constants';
 import { AirtableRecord, AirtableRecordFields } from './types';
@@ -280,6 +281,17 @@ export default function App() {
   const [openStatusDropdown, setOpenStatusDropdown] = useState<string | null>(null); // ID rekordu z otwartym dropdown statusu
   const [uploadingFile, setUploadingFile] = useState<{ recordId: string; columnKey: string; progress: string } | null>(null);
   const [dragOverFile, setDragOverFile] = useState<{ recordId: string; columnKey: string } | null>(null);
+
+  // --- Drag Fill State (przeciąganie wartości jak w Excel) ---
+  const [selectedCell, setSelectedCell] = useState<{ recordId: string; columnKey: string } | null>(null);
+  const [dragFillSource, setDragFillSource] = useState<{ recordId: string; columnKey: string; value: string } | null>(null);
+  const [dragFillTarget, setDragFillTarget] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  const [isDraggingFill, setIsDraggingFill] = useState(false);
+
+  // Refs do przechowywania aktualnych wartości dla event handlers (unika problemu z closure)
+  const dragFillSourceRef = useRef<{ recordId: string; columnKey: string; value: string } | null>(null);
+  const dragFillTargetRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
+
   const resizingColumn = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
   const resizingRow = useRef<{ startY: number; startHeight: number } | null>(null);
 
@@ -670,6 +682,123 @@ export default function App() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // --- Drag Fill (przeciąganie wartości jak w Excel) ---
+
+  // Pobierz indeks rekordu w tablicy
+  const getRecordIndex = (recordId: string): number => {
+    return records.findIndex(r => r.id === recordId);
+  };
+
+  // Rozpoczęcie przeciągania wartości
+  const handleDragFillStart = (e: React.MouseEvent, recordId: string, columnKey: string, value: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const sourceIndex = getRecordIndex(recordId);
+    const sourceData = { recordId, columnKey, value };
+    const targetData = { startIndex: sourceIndex, endIndex: sourceIndex };
+
+    // Ustaw zarówno stan (dla renderowania) jak i ref (dla event handlers)
+    setDragFillSource(sourceData);
+    setDragFillTarget(targetData);
+    setIsDraggingFill(true);
+    setSelectedCell({ recordId, columnKey });
+
+    dragFillSourceRef.current = sourceData;
+    dragFillTargetRef.current = targetData;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragFillSourceRef.current) return;
+
+      // Znajdź komórkę pod kursorem
+      const element = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const row = element?.closest('tr[data-record-id]');
+      if (row) {
+        const targetRecordId = row.getAttribute('data-record-id');
+        if (targetRecordId) {
+          const targetIndex = records.findIndex(r => r.id === targetRecordId);
+          if (targetIndex !== -1 && dragFillTargetRef.current) {
+            const newTarget = { ...dragFillTargetRef.current, endIndex: targetIndex };
+            dragFillTargetRef.current = newTarget;
+            setDragFillTarget(newTarget);
+          }
+        }
+      }
+    };
+
+    const handleMouseUp = async () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+
+      // Wykonaj wypełnienie używając refs
+      const source = dragFillSourceRef.current;
+      const target = dragFillTargetRef.current;
+
+      if (source && target && activeTool) {
+        const { columnKey: colKey, value: fillValue, recordId: sourceRecordId } = source;
+        const { startIndex, endIndex } = target;
+
+        const minIndex = Math.min(startIndex, endIndex);
+        const maxIndex = Math.max(startIndex, endIndex);
+
+        const recordsToUpdate = records.slice(minIndex, maxIndex + 1).filter(r => r.id !== sourceRecordId);
+
+        if (recordsToUpdate.length > 0) {
+          setIsSaving(true);
+          try {
+            for (const record of recordsToUpdate) {
+              const actualKey = findFieldKey(record, colKey) || colKey;
+              const updateFields: AirtableRecordFields = {};
+
+              const fieldConfig = activeTool.inputFields.find(f => f.key === colKey);
+              if (fieldConfig?.type === 'file' && fillValue) {
+                updateFields[actualKey] = [{ url: fillValue }];
+              } else {
+                updateFields[actualKey] = fillValue;
+              }
+
+              await airtable.updateRecord(activeTool.tableName, record.id, updateFields);
+            }
+            await loadRecords();
+          } catch (err) {
+            console.error('Błąd wypełniania komórek:', err);
+            alert('Wystąpił błąd podczas wypełniania komórek.');
+          } finally {
+            setIsSaving(false);
+          }
+        }
+      }
+
+      // Wyczyść stan
+      setIsDraggingFill(false);
+      setDragFillSource(null);
+      setDragFillTarget(null);
+      dragFillSourceRef.current = null;
+      dragFillTargetRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Sprawdź czy komórka jest w zakresie wypełnienia
+  const isCellInFillRange = (recordId: string, columnKey: string): boolean => {
+    if (!isDraggingFill || !dragFillSource || !dragFillTarget) return false;
+    if (columnKey !== dragFillSource.columnKey) return false;
+
+    const recordIndex = getRecordIndex(recordId);
+    const { startIndex, endIndex } = dragFillTarget;
+    const minIndex = Math.min(startIndex, endIndex);
+    const maxIndex = Math.max(startIndex, endIndex);
+
+    return recordIndex >= minIndex && recordIndex <= maxIndex && recordId !== dragFillSource.recordId;
+  };
+
+  // Sprawdź czy komórka jest źródłem przeciągania
+  const isCellDragSource = (recordId: string, columnKey: string): boolean => {
+    return selectedCell?.recordId === recordId && selectedCell?.columnKey === columnKey;
   };
 
   // --- Column Visibility ---
@@ -1139,41 +1268,49 @@ export default function App() {
             {/* Przycisk eksportu dla narzędzi obsługujących eksport */}
             {activeTool?.supportsExport && records.some(r => {
               const status = String(getFieldValue(r, STATUS_FIELD_NAME) || '').toLowerCase();
-              return status === 'zrobione';
+              return status === 'eksportuj dane do pliku';
             }) && (
               <button
-                onClick={async () => {
+                onClick={() => {
                   if (!activeTool) return;
-                  const confirmed = window.confirm(
-                    'Czy chcesz wyeksportować wszystkie ukończone rekordy do pliku Excel?\n\n' +
-                    'Plik zostanie wysłany na adres email skonfigurowany w automatyzacji n8n.'
-                  );
-                  if (!confirmed) return;
 
-                  try {
-                    // Znajdź pierwszy rekord ze statusem "Zrobione" i zmień na "Eksportuj dane do pliku"
-                    const doneRecord = records.find(r => {
-                      const status = String(getFieldValue(r, STATUS_FIELD_NAME) || '').toLowerCase();
-                      return status === 'zrobione';
-                    });
+                  // Filtruj rekordy ze statusem "Eksportuj dane do pliku"
+                  const recordsToExport = records.filter(r => {
+                    const status = String(getFieldValue(r, STATUS_FIELD_NAME) || '').toLowerCase();
+                    return status === 'eksportuj dane do pliku';
+                  });
 
-                    if (doneRecord) {
-                      await airtable.updateRecord(activeTool.tableName, doneRecord.id, {
-                        [STATUS_FIELD_NAME]: PRODUCT_DESC_STATUSES.EXPORT
-                      });
-                      alert('Eksport został uruchomiony! Plik zostanie wysłany na email po przetworzeniu.');
-                      await loadRecords();
-                    }
-                  } catch (err) {
-                    alert('Błąd podczas uruchamiania eksportu. Sprawdź konsolę.');
-                    console.error(err);
+                  if (recordsToExport.length === 0) {
+                    alert('Brak rekordów do eksportu.');
+                    return;
                   }
+
+                  // Przygotuj dane do eksportu
+                  const exportData = recordsToExport.map(record => ({
+                    'Link do produktu': getFieldValue(record, 'URL') || '',
+                    'Opis rozszerzony': getFieldValue(record, 'Opis rozszerzony') || ''
+                  }));
+
+                  // Utwórz arkusz i skoroszyt
+                  const worksheet = XLSX.utils.json_to_sheet(exportData);
+                  const workbook = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(workbook, worksheet, 'Eksport');
+
+                  // Ustaw szerokość kolumn
+                  worksheet['!cols'] = [
+                    { wch: 60 }, // Link do produktu
+                    { wch: 100 } // Opis rozszerzony
+                  ];
+
+                  // Generuj i pobierz plik
+                  const fileName = `eksport_${new Date().toISOString().slice(0, 10)}.xls`;
+                  XLSX.writeFile(workbook, fileName);
                 }}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-all active:scale-95"
-                title="Eksportuj ukończone rekordy do Excel"
+                title="Eksportuj rekordy do pliku Excel"
               >
                 <Send className="w-4 h-4" />
-                <span className="hidden sm:inline">Eksportuj</span>
+                <span className="hidden sm:inline">Eksportuj plik .xls</span>
               </button>
             )}
 
@@ -1297,7 +1434,11 @@ export default function App() {
                       </span>
                       <span className="hidden lg:inline text-slate-300">|</span>
                       <span>
-                        <span className="text-emerald-500">✎</span> Kliknij 2x aby edytować
+                        <span className="text-emerald-500">✎</span> Kliknij, aby edytować rekord
+                      </span>
+                      <span className="hidden lg:inline text-slate-300">|</span>
+                      <span className="hidden lg:inline">
+                        <span className="text-purple-500">▪</span> Przeciągnij róg komórki, aby wypełnić
                       </span>
                     </div>
                   </div>
@@ -1355,7 +1496,8 @@ export default function App() {
                           return (
                             <tr
                               key={record.id}
-                              onClick={() => { if (!editingCell) { setSelectedRecord(record); setShowForm(false); } }}
+                              data-record-id={record.id}
+                              onClick={() => { if (!editingCell && !isDraggingFill) { setSelectedRecord(record); setShowForm(false); } }}
                               className={`border-b border-slate-100 cursor-pointer transition-all hover:bg-blue-50/50 ${
                                 isSelected ? 'bg-blue-50 ring-2 ring-inset ring-blue-500' : ''
                               }`}
@@ -1371,13 +1513,22 @@ export default function App() {
                                 if (columnKey === 'Status') {
                                   const statusColors = getStatusColors(status);
                                   const isDropdownOpen = openStatusDropdown === record.id;
+                                  const isFillSource = isCellDragSource(record.id, columnKey);
+                                  const isInFillRange = isCellInFillRange(record.id, columnKey);
 
                                   return (
                                     <td
                                       key={columnKey}
-                                      className="px-2 py-1 border-r border-slate-100 align-middle relative"
+                                      className={`px-2 py-1 border-r border-slate-100 align-middle relative group ${
+                                        isFillSource ? 'ring-2 ring-blue-500 ring-inset' : ''
+                                      } ${isInFillRange ? 'bg-blue-100' : ''}`}
                                       style={{ width: getColumnWidth('Status') }}
-                                      onClick={e => e.stopPropagation()}
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        if (!isDraggingFill) {
+                                          setSelectedCell({ recordId: record.id, columnKey });
+                                        }
+                                      }}
                                     >
                                       {/* Przycisk pokazujący aktualny status */}
                                       <button
@@ -1420,6 +1571,18 @@ export default function App() {
                                           </div>
                                         </>
                                       )}
+
+                                      {/* Uchwyt do przeciągania wartości (fill handle) */}
+                                      {(isFillSource || true) && !isDropdownOpen && (
+                                        <div
+                                          className={`absolute bottom-0 right-0 w-3 h-3 bg-blue-600 cursor-crosshair z-10 ${
+                                            isFillSource ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                          } transition-opacity`}
+                                          style={{ transform: 'translate(50%, 50%)' }}
+                                          onMouseDown={e => handleDragFillStart(e, record.id, columnKey, status)}
+                                          title="Przeciągnij, aby wypełnić"
+                                        />
+                                      )}
                                     </td>
                                   );
                                 }
@@ -1455,19 +1618,26 @@ export default function App() {
                                 if (colInfo.type === 'output') {
                                   const content = getFieldValue(record, columnKey);
                                   const displayContent = content ? String(content).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+                                  const isFillSource = isCellDragSource(record.id, columnKey);
+                                  const isInFillRange = isCellInFillRange(record.id, columnKey);
 
                                   return (
                                     <td
                                       key={columnKey}
-                                      className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden ${
+                                      className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden relative group ${
                                         isEditing ? 'bg-blue-50 p-1' : 'hover:bg-slate-50'
-                                      }`}
+                                      } ${isFillSource ? 'ring-2 ring-blue-500 ring-inset' : ''} ${isInFillRange ? 'bg-blue-100' : ''}`}
                                       style={{ width: getColumnWidth(columnKey), maxHeight: rowHeight }}
                                       onDoubleClick={e => {
                                         e.stopPropagation();
                                         startCellEdit(record.id, columnKey, String(content || ''));
                                       }}
-                                      onClick={e => isEditing && e.stopPropagation()}
+                                      onClick={e => {
+                                        if (isEditing) e.stopPropagation();
+                                        if (!isDraggingFill && !isEditing) {
+                                          setSelectedCell({ recordId: record.id, columnKey });
+                                        }
+                                      }}
                                     >
                                       {isEditing ? (
                                         <div className="flex flex-col gap-1">
@@ -1499,14 +1669,26 @@ export default function App() {
                                             overflow: 'hidden',
                                             maxHeight: rowHeight - 16
                                           }}
-                                          title="Kliknij dwukrotnie, aby edytować"
+                                          title="Kliknij, aby edytować rekord"
                                         >
                                           {displayContent ? (
                                             <span className="text-slate-600">{displayContent}</span>
                                           ) : (
-                                            <span className="text-slate-300 italic">Kliknij 2x aby edytować...</span>
+                                            <span className="text-slate-300 italic">Kliknij, aby edytować rekord</span>
                                           )}
                                         </div>
+                                      )}
+
+                                      {/* Uchwyt do przeciągania wartości (fill handle) */}
+                                      {!isEditing && (
+                                        <div
+                                          className={`absolute bottom-0 right-0 w-3 h-3 bg-blue-600 cursor-crosshair z-10 ${
+                                            isFillSource ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                          } transition-opacity`}
+                                          style={{ transform: 'translate(50%, 50%)' }}
+                                          onMouseDown={e => handleDragFillStart(e, record.id, columnKey, String(content || ''))}
+                                          title="Przeciągnij, aby wypełnić"
+                                        />
                                       )}
                                     </td>
                                   );
@@ -1677,19 +1859,26 @@ export default function App() {
                                 const val = getFieldValue(record, columnKey);
                                 const displayVal = val ? String(val) : '';
                                 const isUrl = colInfo.type === 'url' || displayVal.startsWith('http');
+                                const isFillSource = isCellDragSource(record.id, columnKey);
+                                const isInFillRange = isCellInFillRange(record.id, columnKey);
 
                                 return (
                                   <td
                                     key={columnKey}
-                                    className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden ${
+                                    className={`px-4 py-2 text-sm text-slate-700 border-r border-slate-100 align-top overflow-hidden relative group ${
                                       isEditing ? 'bg-blue-50 p-1' : 'hover:bg-slate-50'
-                                    }`}
+                                    } ${isFillSource ? 'ring-2 ring-blue-500 ring-inset' : ''} ${isInFillRange ? 'bg-blue-100' : ''}`}
                                     style={{ width: getColumnWidth(columnKey, colInfo.type), maxHeight: rowHeight }}
                                     onDoubleClick={e => {
                                       e.stopPropagation();
                                       startCellEdit(record.id, columnKey, displayVal);
                                     }}
-                                    onClick={e => isEditing && e.stopPropagation()}
+                                    onClick={e => {
+                                      if (isEditing) e.stopPropagation();
+                                      if (!isDraggingFill && !isEditing) {
+                                        setSelectedCell({ recordId: record.id, columnKey });
+                                      }
+                                    }}
                                   >
                                     {isEditing ? (
                                       <div className="flex flex-col gap-1">
@@ -1726,7 +1915,7 @@ export default function App() {
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="overflow-hidden cursor-text" style={{ maxHeight: rowHeight - 16 }} title="Kliknij dwukrotnie, aby edytować">
+                                      <div className="overflow-hidden cursor-text" style={{ maxHeight: rowHeight - 16 }} title="Kliknij, aby edytować rekord">
                                         {isUrl && displayVal ? (
                                           <a
                                             href={displayVal}
@@ -1753,10 +1942,22 @@ export default function App() {
                                               overflow: 'hidden'
                                             }}
                                           >
-                                            {displayVal || <span className="text-slate-300 italic">Kliknij 2x...</span>}
+                                            {displayVal || <span className="text-slate-300 italic">Kliknij, aby edytować rekord</span>}
                                           </div>
                                         )}
                                       </div>
+                                    )}
+
+                                    {/* Uchwyt do przeciągania wartości (fill handle) */}
+                                    {!isEditing && (
+                                      <div
+                                        className={`absolute bottom-0 right-0 w-3 h-3 bg-blue-600 cursor-crosshair z-10 ${
+                                          isFillSource ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                        } transition-opacity`}
+                                        style={{ transform: 'translate(50%, 50%)' }}
+                                        onMouseDown={e => handleDragFillStart(e, record.id, columnKey, displayVal)}
+                                        title="Przeciągnij, aby wypełnić"
+                                      />
                                     )}
                                   </td>
                                 );
