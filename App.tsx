@@ -277,6 +277,7 @@ export default function App() {
 
   // --- Airtable Schema State ---
   const [airtableFields, setAirtableFields] = useState<AirtableFieldSchema[]>([]);
+  const [lastModifiedFieldName, setLastModifiedFieldName] = useState<string | null>(null);
   const [isLoadingSchema, setIsLoadingSchema] = useState(false);
   const [savedFieldsConfig, setSavedFieldsConfig] = useState<ToolFieldsConfig>(() => {
     const saved = localStorage.getItem('POLTEL_TOOL_FIELDS_CONFIG');
@@ -634,6 +635,9 @@ export default function App() {
       const schema = await airtable.getTableSchema(activeTool.tableName);
       if (schema) {
         setAirtableFields(schema.fields);
+        // Wykryj pole typu lastModifiedTime i zapisz jego nazwę
+        const lastModField = schema.fields.find(f => f.type === 'lastModifiedTime');
+        setLastModifiedFieldName(lastModField?.name || null);
       }
     } catch (err) {
       console.error('Błąd pobierania schematu:', err);
@@ -1998,7 +2002,9 @@ export default function App() {
 
                                 // Data modyfikacji (tylko odczyt)
                                 if (columnKey === 'Zmodyfikowano') {
-                                  const lastModified = getFieldValue(record, 'Last modified time');
+                                  const lastModified = lastModifiedFieldName
+                                    ? getFieldValue(record, lastModifiedFieldName)
+                                    : undefined;
                                   return (
                                     <td
                                       key={columnKey}
@@ -2402,7 +2408,8 @@ export default function App() {
                         Utworzono: {new Date(selectedRecord.createdTime).toLocaleString('pl-PL')}
                       </span>
                       {(() => {
-                        const lastMod = getFieldValue(selectedRecord, 'Last modified time');
+                        if (!lastModifiedFieldName) return null;
+                        const lastMod = getFieldValue(selectedRecord, lastModifiedFieldName);
                         if (!lastMod) return null;
                         return (
                           <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded flex items-center gap-1">
